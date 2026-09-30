@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 _DEVICE = re.compile(
-    r"^\s*(?P<id>(?P<backend>CUDA|ROCm|Metal|Vulkan)(?P<index>\d+)):\s+"
+    r"^\s*(?P<id>(?P<backend>CUDA|ROCm|MTL|Metal|Vulkan)(?P<index>\d+)):\s+"
     r"(?P<name>.+?)\s+\((?P<total>\d+) MiB,\s+(?P<free>\d+) MiB free\)\s*$"
 )
 
@@ -45,7 +45,11 @@ def parse_device_list(output: str) -> tuple[LlamaCppDevice, ...]:
         devices.append(
             LlamaCppDevice(
                 engine_id=match.group("id"),
-                backend=match.group("backend").lower(),
+                # The pinned Metal worker reports MTL0, while deployments
+                # call the backend Metal. Preserve the worker's device ID.
+                backend={"MTL": "metal"}.get(
+                    match.group("backend"), match.group("backend").lower()
+                ),
                 index=int(match.group("index")),
                 name=match.group("name"),
                 total_mib=int(match.group("total")),

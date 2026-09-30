@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from engrai_server.domain.deployments import DeploymentProfile
-from engrai_server.engines.llamacpp import LlamaCppDevice
+from engrai_server.engines.llamacpp import LlamaCppDevice, parse_device_list
 from engrai_server.llamacpp import effective_cache_capabilities, plan_deployment
 from engrai_server.profiles import ProfileStore
 
@@ -32,6 +32,18 @@ def test_planner_resolves_all_asymmetric_cuda_devices() -> None:
     assert planned.compute.gpu_layers == "all"
     assert planned.compute.tensor_split == [24564.0, 12288.0]
 
+
+def test_planner_resolves_pinned_metal_device_output() -> None:
+    devices = parse_device_list(
+        "Available devices:\n  MTL0: Apple M4 Max (28753 MiB, 28753 MiB free)\n"
+    )
+
+    planned = plan_deployment(unresolved_deployment(), backend="metal", devices=devices)
+
+    assert planned.compute.backend == "metal"
+    assert planned.compute.devices == [0]
+    assert planned.compute.gpu_layers == "all"
+    assert planned.compute.tensor_split == []
 
 def test_planner_preserves_an_explicit_single_gpu_policy() -> None:
     direct = unresolved_deployment()

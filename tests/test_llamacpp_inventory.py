@@ -41,18 +41,35 @@ def test_parse_device_list_distinguishes_rocm_and_vulkan_views() -> None:
     assert device_map(devices, "vulkan") == {0: "Vulkan0"}
 
 
-def test_probe_devices_executes_the_selected_binary(tmp_path: Path) -> None:
-    executable = tmp_path / "llama-server"
+@pytest.mark.parametrize("engine_id", ["MTL0", "Metal0"])
+def test_probe_devices_executes_the_selected_binary(tmp_path: Path, engine_id: str) -> None:    executable = tmp_path / "llama-server"
     executable.write_text(
         "#!/bin/sh\nprintf '%s\\n' 'Available devices:' "
-        "'  Metal0: Apple M4 Max (49152 MiB, 40000 MiB free)'\n",
+               f"'  {engine_id}: Apple M4 Max (49152 MiB, 40000 MiB free)'\n",
         encoding="utf-8",
     )
     executable.chmod(0o755)
 
     devices = probe_devices(executable)
-    assert devices[0].engine_id == "Metal0"
+   assert devices[0].engine_id == engine_id    
+   assert devices[0].backend == "metal"
+
+
+
+def test_pinned_metal_output_ignores_blas_and_preserves_device_id() -> None:
+    devices = parse_device_list(
+        """0.00.000.073 I srv  llama_server: initializing ...
+Available devices:
+  MTL0: Apple M4 Max (28753 MiB, 28753 MiB free)
+  BLAS: Accelerate (0 MiB, 0 MiB free)
+"""
+    )
+
+    assert len(devices) == 1
     assert devices[0].backend == "metal"
+    assert devices[0].name == "Apple M4 Max"
+    assert devices[0].total_mib == devices[0].free_mib == 28753
+    assert device_map(devices, "metal") == {0: "MTL0"}
 
 
 def test_probe_devices_reports_binary_failure(tmp_path: Path) -> None:
