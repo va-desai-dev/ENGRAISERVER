@@ -1,0 +1,14 @@
+{
+  "name": "ENGRAI SERVER",
+  "short_name": "ENGRAI SERVER",
+  "description": "Sovereign host control plane and runtime orchestrator",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f0709",
+  "theme_color": "#0f0709",
+  "icons": [
+    { "src": "/favicon.svg?v=47ff778c", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

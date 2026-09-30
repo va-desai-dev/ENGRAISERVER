@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/va-desai-dev/ENGRAISERVER/raw/main/@models/schemas/deployment-profile.schema.json",
+  "title": "ENGRAI local deployment profile",
+  "description": "Machine-local XDG data. Do not publish populated instances.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "model", "engine"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "model": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "engine": { "enum": ["llama.cpp", "stable-diffusion.cpp"] },
+    "engine_version": { "type": ["string", "null"] },
+    "compute": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backend": { "enum": ["auto", "cuda", "rocm", "metal", "vulkan", "cpu"], "default": "auto" },
+        "devices": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "uniqueItems": true },
+        "gpu_layers": { "oneOf": [{ "enum": ["auto", "all"] }, { "type": "integer", "minimum": 0 }] },
+        "split_mode": { "enum": ["none", "layer", "row"], "default": "layer" },
+        "main_gpu": { "type": ["integer", "null"], "minimum": 0 },
+        "tensor_split": { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 } },
+        "flash_attention": { "type": "boolean", "default": true }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "context": { "type": ["integer", "null"], "minimum": 1 },
+        "kv_cache": { "enum": ["f16", "q8_0", "q4_0"], "default": "q8_0" },
+        "kv_offload": { "type": "boolean", "default": true },
+        "context_shift": { "type": "boolean", "default": true },
+        "cache_reuse_min_tokens": { "type": "integer", "minimum": 0, "default": 256 },
+        "parallel_slots": { "type": "integer", "minimum": 1, "default": 1 }
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_tokens": { "type": ["integer", "null"], "minimum": 1 },
+        "reasoning_effort": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] }
+      }
+    },
+    "advanced": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "extra_arguments": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,104 @@
+# Python
+.venv/
+/ui/node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+*.egg-info/
+*.tsbuildinfo
+build/
+dist/
+
+# Secrets — never commit these.
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+gateway.env
+.netrc
+/.npmrc
+/.pypirc
+.cloudflared/
+.kube/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.kdbx
+*.token
+*.secret
+*.credentials.json
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+credentials.json
+credentials.*.json
+secrets.json
+secrets.*.json
+state/credentials.json
+
+# Machine-local runtime state.
+state/runtime.json
+state/image-runtime.json
+state/image-results/
+# Your model search roots, set from the UI.
+state/preferences.json
+state/*.log
+state/*.tmp
+state/*.json
+*.runtime.json
+*.log
+*.sqlite
+*.sqlite3
+*.db
+/cache/
+
+# Local editor and agent state. Repository-wide contributor instructions should
+# use deliberately reviewed files rather than a personal assistant dump.
+.agents/
+.claude/
+.codex/
+/CLAUDE.md
+/CONTEXT.md
+*.code-workspace
+.pytest_cache
+.venv
+.vscode
+
+# Compiled runtime bundles are release artifacts. The pinned source and build
+# recipe live in Git; generated binaries never do.
+bin/
+
+# macOS metadata, from editing over a share.
+.DS_Store
+
+# JetBrains project state, local to one machine.
+.idea/
+state/dev/
+
+# Machine-local model profiles and weights. Public, portable manifests belong
+# in a separate reviewed catalog (for example @models/catalog/) and contain
+# source identities, never absolute cache paths or hardware-specific overrides.
+/commands/*.json
+/image-commands/*.json
+/@models/local/
+/@models/deployments/
+/@models/cache/
+/@models/weights/
+/models/local/
+/models/cache/
+/models/weights/
+*.gguf
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+
+# Engine sources are fetched at the commits pinned in runtime/*.lock.json by
+# scripts/fetch-engine-sources.py; they are never vendored into this repo.
+/third_party/*/

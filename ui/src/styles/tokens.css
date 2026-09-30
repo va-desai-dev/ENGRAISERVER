@@ -1,0 +1,99 @@
+/* ── ENGRAI design tokens ──────────────────────────────────────────────────
+   The brand block is the source of truth, mirroring the Xcode export. Do not
+   re-tune these by eye; change them here and let everything else follow.
+   Everything below the brand block is derived, so a palette change is one
+   edit rather than a sweep.
+   ------------------------------------------------------------------------ */
+
+:root {
+  /* Brand — verbatim from the Xcode export. */
+  --accent: #ff3b5c;
+  --background: #0f0709;
+  --border: #443c45;
+  --card: #160b0e;
+  --foreground: #f5efe8;
+  --muted-foreground: #585355;
+  --primary-icon: #ff7e92;
+  --overlay-icon: #d85069;
+  --destructive: #97322d;
+
+  /* Text roles. --muted-foreground is 2.6:1 on --background, which is fine
+     behind a disabled control and unreadable as a label, so secondary text is
+     mixed from --foreground instead: 6.5:1 and 4.8:1 respectively. */
+  --text: var(--foreground);
+  --text-muted: #99928f;
+  --text-quiet: #827b78;
+  --text-disabled: var(--muted-foreground);
+
+  /* Surfaces, lifted off the brand values rather than invented. */
+  --bg: var(--background);
+  --header-bg: rgba(15, 7, 9, 0.93);
+  --surface: var(--card);
+  --surface-2: #22181a;
+  --surface-3: #2b2023;
+  --line: var(--border);
+  --line-bright: #605a61;
+
+  /* Status. --destructive is 2.7:1 and cannot carry error text, so it fills
+     and borders while --overlay-icon (5.0:1) does the talking. */
+  --ok: #3ddc97;
+  --warn: #ffbb4d;
+  --danger-fill: var(--destructive);
+  --danger-text: var(--overlay-icon);
+
+  /* Accent washes. Pre-mixed so no rule has to re-derive the alpha. */
+  --accent-wash: rgba(255, 59, 92, 0.10);
+  --accent-wash-strong: rgba(255, 59, 92, 0.18);
+  --accent-line: rgba(255, 59, 92, 0.38);
+
+  /* Space — a 4px base. Named by step, not by use, so the same rhythm holds
+     in both the pocket layout and the wall display. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+  --s8: 32px;
+  --s10: 40px;
+  --s12: 48px;
+  --s16: 64px;
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+  --r-full: 999px;
+
+  /* Type. Inter if the host has it, otherwise the platform UI face — which on
+     iOS is San Francisco and is what makes a PWA read as an app. */
+  --font: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  /* Motion. One easing for entrances, one for exits, one spring-ish curve for
+     anything the finger is directly driving. Durations stay under 240ms so the
+     interface never feels like it is animating at you. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+  --dur-slow: 240ms;
+
+  /* Depth. A single shadow ramp; blur is expensive on mobile GPUs so the
+     interface separates with line and fill first, shadow last. */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.6);
+
+  /* Safe areas, resolved once. iOS reports 0 off-notch, so these are inert on
+     a desktop monitor and correct on a phone without a media query. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  /* The smallest square a finger can reliably hit. Every interactive element
+     meets this, including ones that look smaller. */
+  --touch: 44px;
+}

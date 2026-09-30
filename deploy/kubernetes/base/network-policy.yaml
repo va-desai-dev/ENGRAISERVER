@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: engrai-server-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: engrai-server
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              engrai.network/client: "true"
+      ports:
+        - protocol: TCP
+          port: 8400

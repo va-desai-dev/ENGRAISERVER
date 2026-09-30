@@ -1,0 +1,14 @@
+# Example cloudflared ingress. Replace the hostname with your own tunnel
+# hostname; the service address must match ENGRAI_BIND_HOST/ENGRAI_BIND_PORT in your
+# gateway env file.
+#
+# When cloudflared runs on the same host as the gateway, leave the gateway on
+# 127.0.0.1 and point the tunnel at loopback: nothing on the LAN can reach the
+# control plane, and only the tunnel can.
+tunnel: <your-tunnel-id>
+credentials-file: /home/<user>/.cloudflared/<your-tunnel-id>.json
+
+ingress:
+  - hostname: llm.example.com
+    service: http://127.0.0.1:8400
+  - service: http_status:404

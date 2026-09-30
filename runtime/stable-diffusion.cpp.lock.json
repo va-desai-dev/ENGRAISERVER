@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "runtime_id": "engrai-image",
+  "runtime_version": "0.1.0-sdcpp-ac45422",
+  "kernel": {
+    "name": "stable-diffusion.cpp",
+    "repository": "https://github.com/leejet/stable-diffusion.cpp.git",
+    "tag": "master-ac45422",
+    "commit": "ac45422a05fd962cfae3c8f358e461cb647b8bd7",
+    "license": "MIT"
+  },
+  "submodules": {
+    "ggml": "4bf5f6000653b7881d00963cd6ddb665ccd62a8d",
+    "thirdparty/libwebp": "0c9546f7efc61eac7f79ae115c3f99c91c21c443"
+  }
+}

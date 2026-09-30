@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "runtime_id": "engrai-text",
+  "runtime_version": "0.1.0-llama-v0.5.0",
+  "kernel": {
+    "name": "llama.cpp",
+    "repository": "https://github.com/ggml-org/llama.cpp.git",
+    "tag": "v0.5.0",
+    "commit": "7fe450e19305b828c199d602c23a8337aaa1f03b",
+    "license": "MIT"
+  }
+}

@@ -1,0 +1,46 @@
+name: engrai
+
+services:
+  server:
+    image: engrai-server:0.1.0-cpu
+    build:
+      context: .
+      dockerfile: Containerfile
+      args:
+        ENGRAI_BACKEND: cpu
+        BUILD_JOBS: ${BUILD_JOBS:-4}
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:8400:8400"
+    environment:
+      ENGRAI_HOME: /var/lib/engrai
+      ENGRAI_BIND_HOST: 0.0.0.0
+      ENGRAI_MODEL_SEARCH_ROOTS: /models
+      ENGRAI_MODEL_DOWNLOAD_DIR: /models/.huggingface/hub
+      HF_HOME: /models/.huggingface
+      # Optional. Prefer a read-only token with access only to required repos.
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - engrai-state:/var/lib/engrai
+      - ${ENGRAI_MODELS_PATH:-engrai-models}:/models:Z
+    tmpfs:
+      - /tmp:size=1g,mode=1777
+    healthcheck:
+      test:
+        - CMD
+        - /opt/engrai/venv/bin/python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8400/healthz', timeout=3).read()
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+volumes:
+  engrai-state:
+  engrai-models:

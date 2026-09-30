@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engrai-server
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: engrai-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: engrai-server
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: server
+          image: engrai-server:0.1.0-cpu
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: gateway
+              containerPort: 8400
+              protocol: TCP
+          env:
+            - name: HOME
+              value: /var/lib/engrai
+            - name: ENGRAI_HOME
+              value: /var/lib/engrai
+            - name: ENGRAI_BIND_HOST
+              value: 0.0.0.0
+            - name: ENGRAI_ENGINE_HOST
+              value: 127.0.0.1
+            - name: ENGRAI_MODEL_SEARCH_ROOTS
+              value: /models
+            - name: ENGRAI_MODEL_DOWNLOAD_DIR
+              value: /models/.huggingface/hub
+            - name: HF_HOME
+              value: /models/.huggingface
+            - name: ENGRAI_INSTALL_BUNDLED_RUNTIMES
+              value: "1"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          envFrom:
+            - secretRef:
+                name: engrai-bootstrap
+                optional: true
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "8"
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: gateway
+            failureThreshold: 30
+            periodSeconds: 2
+            timeoutSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: gateway
+            failureThreshold: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: gateway
+            failureThreshold: 3
+            periodSeconds: 30
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/engrai
+            - name: models
+              mountPath: /models
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: engrai-state
+        - name: models
+          persistentVolumeClaim:
+            claimName: engrai-models
+        - name: temporary
+          emptyDir:
+            sizeLimit: 2Gi

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/va-desai-dev/ENGRAISERVER/raw/main/@models/schemas/model-manifest.schema.json",
+  "title": "ENGRAI portable model manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "name", "task", "format", "source", "artifacts"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "name": { "type": "string", "minLength": 1 },
+    "task": { "enum": ["chat", "completion", "embedding", "diffusion", "vision", "audio"] },
+    "format": { "enum": ["gguf", "safetensors", "diffusers"] },
+    "architecture": { "type": ["string", "null"] },
+    "quantization": { "type": ["string", "null"] },
+    "license": { "type": ["string", "null"] },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "repository", "revision"],
+      "properties": {
+        "provider": { "const": "huggingface" },
+        "repository": { "type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$" },
+        "revision": { "type": "string", "minLength": 7 }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "required": ["model"],
+      "additionalProperties": { "$ref": "#/$defs/artifact" }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "chat": { "type": "boolean", "default": false },
+        "completion": { "type": "boolean", "default": false },
+        "reasoning": { "type": "boolean", "default": false },
+        "vision": { "type": "boolean", "default": false },
+        "image_generation": { "type": "boolean", "default": false }
+      }
+    },
+    "prompt": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "template": { "enum": ["metadata", "jinja", "none"], "default": "metadata" },
+        "adapter": { "type": "string", "default": "auto" },
+        "thinking": { "type": "boolean", "default": false }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "recommended_context": { "type": ["integer", "null"], "minimum": 1 },
+        "maximum_context": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "required_engine_capabilities": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filename"],
+      "properties": {
+        "filename": { "type": "string", "minLength": 1, "not": { "pattern": "^(?:/|~|.*(?:^|/)\\.\\.(?:/|$))" } },
+        "sha256": { "type": ["string", "null"], "pattern": "^[a-fA-F0-9]{64}$" }
+      }
+    }
+  }
+}

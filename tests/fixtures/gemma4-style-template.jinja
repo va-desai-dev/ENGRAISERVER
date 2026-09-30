@@ -1,0 +1,44 @@
+{#- Minimal template in the Gemma 4 turn format, written for tests. It keeps
+    the behavior the gateway renderer depends on: a thinking flag in the first
+    system turn, thought channels stripped from model history, and an empty
+    thought channel in the generation prompt when thinking is off. -#}
+{%- macro strip_thinking(text) -%}
+    {%- set ns = namespace(result='') -%}
+    {%- for part in text.split('<channel|>') -%}
+        {%- if '<|channel>' in part -%}
+            {%- set ns.result = ns.result + part.split('<|channel>')[0] -%}
+        {%- else -%}
+            {%- set ns.result = ns.result + part -%}
+        {%- endif -%}
+    {%- endfor -%}
+    {{- ns.result | trim -}}
+{%- endmacro -%}
+{%- set loop_messages = messages -%}
+{{- bos_token -}}
+{%- if (enable_thinking is defined and enable_thinking) or messages[0]['role'] == 'system' -%}
+    {{- '<|turn>system\n' -}}
+    {%- if enable_thinking is defined and enable_thinking -%}
+        {{- '<|think|>\n' -}}
+    {%- endif -%}
+    {%- if messages[0]['role'] == 'system' -%}
+        {{- messages[0]['content'] | trim -}}
+        {%- set loop_messages = messages[1:] -%}
+    {%- endif -%}
+    {{- '<turn|>\n' -}}
+{%- endif -%}
+{%- for message in loop_messages -%}
+    {%- set role = 'model' if message['role'] == 'assistant' else message['role'] -%}
+    {{- '<|turn>' + role + '\n' -}}
+    {%- if role == 'model' -%}
+        {{- strip_thinking(message['content']) -}}
+    {%- else -%}
+        {{- message['content'] | trim -}}
+    {%- endif -%}
+    {{- '<turn|>\n' -}}
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+    {{- '<|turn>model\n' -}}
+    {%- if not enable_thinking | default(false) -%}
+        {{- '<|channel>thought\n<channel|>' -}}
+    {%- endif -%}
+{%- endif -%}

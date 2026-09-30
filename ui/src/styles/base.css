@@ -1,0 +1,154 @@
+/* ── Reset and app shell ───────────────────────────────────────────────────
+   Everything here exists to make the page behave like an application rather
+   than a document, on a phone as much as on a monitor.
+   ------------------------------------------------------------------------ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* iOS enlarges text in landscape unless told not to, which silently breaks
+     every fixed-height row in the layout. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--bg);
+  /* Synthesised bold on a face that lacks the weight looks like a different
+     typeface at display sizes. */
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  /* Safari's URL bar makes 100vh taller than the visible viewport, so a
+     100vh shell hides its own bottom edge behind the toolbar. dvh tracks the
+     bar as it collapses; the svh fallback is correct on Safari 15. */
+  min-height: 100svh;
+  min-height: 100dvh;
+}
+
+#root {
+  min-height: 100svh;
+  min-height: 100dvh;
+  isolation: isolate;
+}
+
+/* Kill the 300ms tap delay and the grey flash iOS paints over tapped
+   elements, both of which read as lag rather than as feedback. */
+button,
+a,
+[role="button"],
+input,
+select,
+textarea,
+summary {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+/* Safari refuses to inherit the accent on form controls otherwise, and shows
+   a blue caret on a red-and-black interface. */
+input,
+textarea,
+select {
+  accent-color: var(--accent);
+  caret-color: var(--accent);
+}
+
+/* iOS zooms the whole viewport when a focused field is under 16px, and never
+   zooms back out. This is the single most common reason a web app feels
+   broken on a phone. */
+@supports (-webkit-touch-callout: none) {
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+code,
+pre,
+kbd {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+pre {
+  margin: 0;
+}
+
+/* Only ever show a focus ring for a keyboard, never for a tap. */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* Scrollbars: visible enough to grab with a mouse, invisible on a phone. */
+@media (pointer: fine) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-bright) transparent;
+  }
+}
+
+::selection {
+  background: var(--accent-wash-strong);
+  color: var(--foreground);
+}
+
+/* Respect the system setting rather than animating regardless. Transforms and
+   opacity still settle instantly so nothing appears mid-flight. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Visually hidden but still read aloud. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

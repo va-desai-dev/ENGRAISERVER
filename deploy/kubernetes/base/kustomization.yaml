@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: engrai-system
+labels:
+  - pairs:
+      app.kubernetes.io/name: engrai-server
+      app.kubernetes.io/part-of: engrai
+resources:
+  - namespace.yaml
+  - state-pvc.yaml
+  - models-pvc.yaml
+  - service.yaml
+  - network-policy.yaml
+  - deployment.yaml
