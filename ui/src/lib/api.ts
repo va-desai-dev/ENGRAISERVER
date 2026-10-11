@@ -104,7 +104,6 @@ export const api = {
   metrics: (signal?: AbortSignal) =>
     request<Metrics>("GET", "/control/metrics", undefined, signal),
   preflight: () => request<PreflightReport>("GET", "/control/preflight"),
-  logs: () => request<{ log: string }>("GET", "/control/logs"),
 
   /* Routing. */
   load: (id: string) =>

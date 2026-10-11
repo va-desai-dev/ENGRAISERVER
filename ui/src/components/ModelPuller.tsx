@@ -94,7 +94,7 @@ export function ModelPuller() {
       const result = await api.searchHubModels(query.trim());
       if (generation.current === current) setModels(result.models);
     } catch (cause) {
-      if (generation.current === current) setError(cause instanceof Error ? cause.message : "Search failed");
+      if (generation.current === current) setError(cause instanceof Error ? cause.message : "Search Failed");
     } finally {
       if (generation.current === current) setSearching(false);
     }
@@ -168,7 +168,7 @@ export function ModelPuller() {
       <div className="panel-head">
         <div>
           <span className="eyebrow">Hugging Face Hub</span>
-          <h2>Download models</h2>
+          <h2>Download Models</h2>
         </div>
         <span className="auth-chip">
           <StatusDot tone={status?.authenticated ? "live" : "cold"} />

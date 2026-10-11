@@ -383,12 +383,29 @@ class ImageControlPlane:
             return available[0]
         raise ImageEngineError("model is required when more than one image model is configured")
 
-    async def generate(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    async def generate(
+        self,
+        payload: dict[str, Any],
+        *,
+        init_image: str | None = None,
+        references: tuple[str, ...] = (),
+        strength: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """Run text-to-image, or image-to-image when ``init_image`` is given.
+
+        Images are bare base64. ``references`` become the worker's reference
+        images, which edit-capable architectures (FLUX.2, Kontext, Qwen-Image
+        Edit) condition on and others ignore; ``init_image`` is denoised from
+        at ``strength``, which works for every architecture.
+        """
         profile = self.choose_profile(payload.get("model"))
         n = int(_number(payload, "n", 1))
         if not 1 <= n <= 10:
             raise ImageEngineError("n must be from 1 to 10")
         requested_seed = int(_number(payload, "seed", -1))
+        if strength is not None and not 0 <= strength <= 1:
+            raise ImageEngineError("strength must be from 0 to 1")
+        route = "/sdapi/v1/img2img" if init_image else "/sdapi/v1/txt2img"
 
         async with self.generation_lock:
             await self.ensure_model(profile)
@@ -403,7 +420,13 @@ class ImageControlPlane:
                     default_sampler=profile.default_sampler,
                     default_scheduler=profile.default_scheduler,
                 )
-                response = await self.client.post("/sdapi/v1/txt2img", json=upstream)
+                if init_image:
+                    upstream["init_images"] = [init_image]
+                    if strength is not None:
+                        upstream["denoising_strength"] = strength
+                if references:
+                    upstream["extra_images"] = list(references)
+                response = await self.client.post(route, json=upstream)
                 response.raise_for_status()
                 result = response.json()
                 images = result.get("images") if isinstance(result, dict) else None

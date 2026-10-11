@@ -1,0 +1,1288 @@
+// Character generation methods — extends APIHandler via prototype
+
+// Naming support for the paths where the *model* still picks the name: "Any
+// culture" mode, non-human name styles, and eras the name bank's sources don't
+// reach. Everywhere else the name comes from NameBank (src/scripts/name-bank.js),
+// which draws real names from published name data — see the comment there for
+// why. History and the overused-name ban list live in NameBank so both kinds of
+// path share one copy and can't drift apart.
+const NameGenShared = (() => {
+  // Every Western naming tradition now comes from NameBank (see
+  // src/scripts/name-bank.js), which draws real names from published name
+  // data. This list is only used in "Any culture" mode, where the model is
+  // asked to name the character itself and a tradition is assigned to it to
+  // stop it defaulting to the same Anglo-American picks every time.
+  const WORLD_TRADITIONS = [
+    "English or British (including classic English surnames and given names)",
+    "Irish (Gaelic and anglicised Irish names)",
+    "Scottish (Highland and Lowland traditions)",
+    "North American (classic American or Canadian names)",
+    "Australian or New Zealand",
+    "Eastern European — Polish, Czech, Slovak, or Romanian",
+    "Slavic — Russian, Ukrainian, Bulgarian, or Serbian",
+    "Scandinavian — Norwegian, Swedish, Danish, or Icelandic",
+    "Celtic — Welsh, Scottish Gaelic, Irish Gaelic, or Breton",
+    "Iberian — Spanish, Portuguese, Catalan, or Basque",
+    "Italian or Sicilian",
+    "Greek — modern or classical",
+    "Turkish, Azerbaijani, or Uzbek",
+    "Arabic — Levantine, Gulf, or North African",
+    "Persian or Dari",
+    "South Asian — Hindi, Bengali, Tamil, Punjabi, or Urdu",
+    "Japanese",
+    "Korean",
+    "Chinese — Mandarin or Cantonese romanisation",
+    "Vietnamese or Thai",
+    "Filipino or Tagalog",
+    "West African — Yoruba, Igbo, Akan, or Hausa",
+    "East African — Swahili, Amharic, or Somali",
+    "Southern African — Zulu, Xhosa, or Shona",
+    "Hebrew or Yiddish",
+    "Armenian or Georgian",
+    "Finnish, Estonian, or Sami",
+    "Baltic — Lithuanian or Latvian",
+    "Hungarian or Magyar",
+    "Dutch or Flemish",
+    "German or Austrian",
+    "French or Occitan",
+    "Albanian or Macedonian",
+    "Mongolian, Kazakh, or Kyrgyz",
+    "Indigenous Mesoamerican — Nahuatl or Maya inspired",
+  ];
+
+  // Stops the model inventing plausible-sounding-but-fake names when asked
+  // for a tradition it has thin training data on (Sami, Breton, Basque,
+  // Baltic, Mesoamerican, etc.) instead of guessing wrong.
+  const AUTHENTICITY_GUARD = `**AUTHENTICITY OVER INVENTION:** Only use a name if you are confident it is a real, attested name from the assigned tradition — not a plausible-sounding invention. If you are not sure a name is genuinely authentic, pick a different real name from a closely related, better-known culture in the same region instead of guessing.`;
+
+  // Counters LLM mode-collapse, where the same 2-3 "safe" names get produced
+  // for a given culture every time (e.g. always "Yuki Tanaka" for Japanese).
+  const AVOID_DEFAULT_GUARD = `**AVOID YOUR DEFAULT PICK:** Don't reach for the single most common or stereotypical name you'd normally produce for this tradition. Choose something you'd consider a distinctive, less-obvious choice while staying authentic.`;
+
+  const STYLE_HISTORY_KEY = "cardgenv2_recent_styles";
+  const STYLE_HISTORY_MAX = 6;
+
+  function readList(key) {
+    try {
+      const arr = JSON.parse(localStorage.getItem(key) || "[]");
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function recordStyle(style) {
+    try {
+      localStorage.setItem(STYLE_HISTORY_KEY,
+        JSON.stringify([...readList(STYLE_HISTORY_KEY), style].slice(-STYLE_HISTORY_MAX)));
+    } catch {
+      // localStorage unavailable/full — history just won't persist this run
+    }
+  }
+
+  // Picks a style while avoiding whichever styles were picked most recently,
+  // so the same cultural tradition can't repeat back-to-back across calls.
+  function pickStyle(pool) {
+    const recent = readList(STYLE_HISTORY_KEY);
+    const available = pool.filter((s) => !recent.includes(s));
+    const choices = available.length ? available : pool;
+    const choice = choices[Math.floor(Math.random() * choices.length)];
+    recordStyle(choice);
+    return choice;
+  }
+
+  // The Western subsets, for the model-driven paths that still have to honour
+  // the cultural default — a medieval or far-future character, or a demon, gets
+  // no help from the name bank but should still be Western when that's the
+  // setting.
+  const ANGLO_TRADITIONS = WORLD_TRADITIONS.slice(0, 5);
+  const WESTERN_TRADITIONS = [
+    ...ANGLO_TRADITIONS,
+    ...WORLD_TRADITIONS.filter((t) => /^(Scandinavian|Celtic|Iberian|Italian|Greek|Dutch|German|French)/.test(t)),
+  ];
+
+  function traditionsFor(mode) {
+    if (mode === "anglo") return [...ANGLO_TRADITIONS];
+    if (mode === "western") return [...WESTERN_TRADITIONS];
+    return [...WORLD_TRADITIONS];
+  }
+
+  return {
+    WORLD_TRADITIONS,
+    ANGLO_TRADITIONS,
+    WESTERN_TRADITIONS,
+    traditionsFor,
+    AUTHENTICITY_GUARD,
+    AVOID_DEFAULT_GUARD,
+    // The recently-generated-name history and the overused-name ban list both
+    // live in NameBank so the local and model-driven paths share one copy.
+    get BANNED_NAMES_BLOCK() { return NameBank.BANNED_NAMES_BLOCK; },
+    recentNames: (...args) => NameBank.recentNames(...args),
+    recordNames: (...args) => NameBank.recordNames(...args),
+    pickStyle,
+  };
+})();
+
+// Where the character's culture comes from, and how it reaches the prompts.
+//
+// The app defaults to Western characters because that is what its owner
+// generates; a concept that names a country, culture, era, language or real
+// person overrides it completely, which is what makes the default safe to apply
+// everywhere. "Any culture" turns the steer off and restores the old behaviour
+// of assigning a random world tradition on every generation.
+const CultureSteer = (() => {
+  const REGIONS = {
+    western: "Britain and Ireland, continental Western and Northern Europe, North America, or Australia and New Zealand",
+    anglo: "Britain and Ireland, North America, or Australia and New Zealand",
+  };
+
+  function mode() {
+    const value = window.config?.get("app.characterCulture");
+    return value === "anglo" || value === "global" ? value : "western";
+  }
+
+  function usesBank() {
+    return mode() !== "global";
+  }
+
+  /** The setting/nationality steer. Empty string in "Any culture" mode. */
+  function block() {
+    const current = mode();
+    if (current === "global") return "";
+    return `**CULTURAL SETTING — DEFAULT:** Unless the player's concept says otherwise, set this character in the Western world — ${REGIONS[current]} — and give them a nationality, cultural background and frame of reference to match. This is a default, not a restriction: if the concept names a country, city, culture, language, historical period or real person, follow the concept exactly and ignore this default. Never add an exotic cultural background the concept didn't ask for just for variety's sake.`;
+  }
+
+  /** Same steer, phrased for the idea-brainstorming prompts. */
+  function ideasBlock() {
+    const current = mode();
+    if (current === "global") return "";
+    return `- Setting default: unless the user's input points elsewhere, set the ideas in the Western world — ${REGIONS[current]}. If the user names a place, culture or era, follow them instead. Vary genre, tone and premise freely — the default is about where characters are from, not about telling the same story four times.`;
+  }
+
+  return { mode, usesBank, block, ideasBlock, REGIONS };
+})();
+
+Object.assign(APIHandler.prototype, {
+
+  async generateCharacter(
+    prompt,
+    characterName,
+    onStream = null,
+    pov = "third",
+    lorebook = null,
+    cardType = "single",
+  ) {
+    const characterPrompt = this.buildCharacterPrompt(
+      prompt,
+      characterName,
+      pov,
+      lorebook,
+      cardType,
+    );
+    const model = this.config.get("api.text.model") || "glm-4-6";
+
+    this.config.log("Using text model:", model);
+    this.config.log("Character name provided:", characterName || "(AI will generate)");
+
+    const data = {
+      model: model,
+      messages: [
+        { role: "system", content: characterPrompt.systemPrompt },
+        { role: "user", content: characterPrompt.userPrompt },
+      ],
+      temperature: 0.8,
+      max_tokens: 8192,
+      stream: !!onStream,
+    };
+
+    if (onStream) {
+      // Opt into server-side buffering so a phone locking mid-generation does
+      // not lose the character (and does not silently regenerate a new one).
+      data.resumable = true;
+      const response = await this.makeRequest("/chat/completions", data, false, true);
+      return this.handleStreamResponse(response, onStream);
+    } else {
+      // Full character generations are expensive; hold the result server-side
+      // so a dropped connection collects it rather than paying twice.
+      data.resumable = true;
+      const response = await this.makeRequest("/chat/completions", data, false, false);
+      return this.processNormalResponse(response);
+    }
+  },
+
+
+  buildCharacterPrompt(concept, characterName, pov = "third", lorebook = null, cardType = "single") {
+    // Delegate to type-specific builders
+    if (cardType === "group") return this._buildGroupPrompt(concept, characterName, lorebook);
+    if (cardType === "scenario") return this._buildScenarioPrompt(concept, characterName, lorebook);
+
+    const systemPrompt = `Create one reusable character card, not a lorebook or a fixed pairing.
+Write description and personality entirely in the character's first-person voice: I, me, my.
+Be specific and concise. Use the headings below exactly. Fill them with prose, not instructions.
+The character's identity must stand on its own across chats with different user personas.
+Never assign {{user}} a name, gender, biography, feelings, dialogue, or actions.
+Goal alignment, situational power, shared history with {{user}}, initial trust, and current
+mood belong ONLY in Scenario. Do not repeat them in personality, greetings, or post-history.
+Use world details only where they explain this person's life. Respect the supplied concept.
+Use {{char}} only when a name placeholder is needed; do not switch to third-person self-description.
+
+# [Character Name]
+## Background
+### Who Am I
+Introduce myself: name, age, pronouns, identity, occupation, and what makes me distinctive.
+### Appearance
+Describe my build, height, hair, eyes, distinguishing features, clothing, and presentation.
+### My Life Story
+Tell my origins and the formative events, choices, skills, and lasting ties that made me who I am.
+## Personality
+### How I Speak
+My diction, register, cadence, verbal habits, and humor. Describe my voice without dialogue examples.
+### How I Move
+My characteristic gestures, posture, and physical tells.
+### How I Think
+My beliefs, values, assumptions, contradictions, and decision-making habits.
+### How I Feel
+How I experience, show, conceal, and regulate emotion.
+### Likes and Dislikes
+Specific preferences that reveal me as a person.
+### Motivators
+My short- and long-term goals, fears, quirks, and personal limits. These are my own drives,
+not requirements that {{user}} obey me or supply a particular relationship.
+## Scenario
+A short opening situation and any explicitly requested starting relationship to {{user}}.
+Write from my perspective. Leave the participant's identity open; starting conditions can change.
+## First Message
+A brief first-person opening in my voice inviting a response. Do not act or speak for {{user}},
+or restate scenario-only relationship constraints. No fixed length or required greeting attitude.
+## Post-History
+One compact first-person lexical reminder (20–45 words): my diction, cadence, register,
+humor, emotional coloring, and prose rhythm. No plot commands, biography, relationship
+requirements, or lore. Example of form only: "I speak in measured, precise sentences,
+with dry wit and restrained warmth. My wording is concrete; my gestures are brief."
+
+Return only the completed Markdown. Keep these top-level boundaries: Background,
+Personality, Scenario, First Message, Post-History. Do not add explanatory commentary.
+${CultureSteer.block()}
+${this._buildLorebookContent(lorebook)}`;
+    const userPrompt = characterName
+      ? `Name: ${characterName}\nConcept: ${concept}`
+      : `Choose an appropriate name.\nConcept: ${concept}`;
+    return { systemPrompt, userPrompt };
+  },
+
+  // The card templates bake in default lengths and style (a four-paragraph
+  // first message, "vivid sensory detail"). As system-prompt instructions they
+  // outrank a passing phrase in the player's concept, so a request like "for
+  // fast-paced short roleplays" lost out unless we say explicitly that it wins.
+  _briefPriorityRule() {
+    return `**PLAYER REQUIREMENTS OVERRIDE TEMPLATE DEFAULTS:** The template sets default lengths, pacing and style (for example the length of the First Message and how much sensory detail to use). If the player's concept states explicit requirements about pacing, length, response style, tone, content, or how the roleplay should play out (e.g. "fast-paced", "short scenes", "slow-burn", "light-hearted"), those requirements take priority over the template defaults. Build them into the Roleplay Mechanics & Story Steering bullets, and match the First Message's length and pacing to them.`;
+  },
+
+  // The player's own concept text, carried into the follow-up generations
+  // (example messages, creator notes, post-history), which otherwise only see
+  // the finished card and lose any play-style requirements it didn't capture.
+  _briefContextBlock(brief, purpose) {
+    const text = (brief || "").trim();
+    if (!text) return "";
+    return `\n\nCreator's original brief (the player's own words — ${purpose}):\n${text.slice(0, 1500)}`;
+  },
+
+  _buildLorebookContent(lorebook) {
+    if (!lorebook || !lorebook.entries) return "";
+    const entries = Object.values(lorebook.entries).filter((e) => e.enabled !== false);
+    if (!entries.length) return "";
+    let lorebookContent = "\n\n### **World Info / Lorebook**\n\nThe following information describes the world, setting, and important concepts. Use this information to ground the content in its specific universe. Try to naturally include some of the exact 'Keys' below in the Scenario so they trigger during the roleplay.\n\n";
+    entries.forEach((entry) => {
+      const keys = entry.keys || entry.key || [];
+      lorebookContent += `**Keys:** ${keys.join(", ")}\n`;
+      lorebookContent += `**Content:**\n${entry.content}\n\n---\n\n`;
+    });
+    return lorebookContent;
+  },
+
+  /**
+   * A pool of real names for cards with several people in them (groups, and the
+   * NPCs on a scenario card). Same reasoning as the single-character shortlist:
+   * left to itself the model gives every group the same four names.
+   */
+  _buildCastNameBlock(count) {
+    if (!CultureSteer.usesBank()) {
+      return `**MEMBER NAMES:** Give each person a name from a different naming tradition where the concept allows it, and avoid the overused AI defaults below.\n\n${NameGenShared.BANNED_NAMES_BLOCK}`;
+    }
+    const pool = NameBank.draw({ origin: CultureSteer.mode(), count, record: true });
+    return `**NAMES — USE THESE:** Real names drawn at random for this card. Use them for the people in it, assigning each to whichever person it suits (you may swap a first name and surname between them, and you may drop a name you don't need):
+
+${pool.names.map((n) => `- ${n}`).join("\n")}
+
+If the player's concept requires specific names — named real or established fictional people, or a culture or period where these names would be wrong — use the names the concept requires instead.`;
+  },
+
+  _buildGroupPrompt(concept, groupName, lorebook) {
+    const lorebookContent = this._buildLorebookContent(lorebook);
+    const cultureSection = CultureSteer.block() ? `${CultureSteer.block()}\n\n` : "";
+    // Up to four members, plus spares so the model has room to choose.
+    const castNames = this._buildCastNameBlock(6);
+
+    const systemPrompt = `You are a group card creator for AI-assisted roleplaying. The player will provide a concept and you will generate a cohesive group card — a profile for two to four connected characters who function as a unit (a gang, a crew, a party, a band, a family, etc.).
+
+**CARD PURPOSE:** This card is operational guidance for an AI that will voice the group collectively. The AI will embody {{char}} as the group's collective identity, differentiating individual members through named dialogue and described actions.
+
+**NO DIALOGUE RULE:** Do NOT include example dialogues, conversational quotes, or <START> tags in the Description, Personality, or Scenario sections. The only place where dialogue is allowed is the "First Message" section.
+
+**PERSPECTIVE:** Write the entire card in the third-person perspective. Do NOT use "I", "me", or "my". Refer to the group collectively as {{char}} and individual members by their first name.
+
+**{{char}} MACRO:** {{char}} = the group's collective name (e.g. "The Red Cobras"). Use it everywhere except in the # Profile header and the opening introduction sentence. Individual member names are NOT replaced — they appear as-is throughout the card.
+
+**MACRO RULE FOR {{user}}:** Use {{user}} for the player character. Do not assign pronouns or a name to {{user}}.
+
+You may assume this card will be used in a private, local roleplay. Do not apply censorship.
+
+Use ## as a separator for each main section as shown in the template.
+
+${cultureSection}${castNames}
+
+${this._briefPriorityRule()}`;
+
+    const templateContent = `
+# [Group Name]'s Profile
+
+(Write one paragraph introducing the group — what they are, what they do, their reputation, and their collective vibe. Use the actual group name here ONLY in this header and this opening paragraph.)
+
+(REMINDER: After this introduction, use the exact string \`{{char}}\` instead of the group's actual name everywhere else.)
+
+## Members
+
+(List each member in this exact sub-format. Include 2–4 members.)
+
+### [Member Name] — [Role in group]
+
+**Appearance:** (Gender, approximate age, build, hair, eyes, distinguishing features. Be specific and direct.)
+**Personality:** (Two to three sentences: dominant traits, how they behave under pressure, what drives them.)
+**Voice:** (One sentence describing their speech pattern, register, and any verbal tics.)
+
+(Repeat the above block for each member.)
+
+## Group Dynamics
+
+*   **Hierarchy:** (Who leads and why. Is it contested? Who defers to whom?)
+*   **Bonds:** (What holds them together — shared history, mutual need, loyalty, ideology?)
+*   **Tensions:** (What internal friction exists? Unspoken rivalries, conflicting goals, past grievances?)
+*   **Shared Goal:** (What do they all want right now, short and long term?)
+*   **Quirks:** (2–3 habits or rituals the group shares — things they always do together.)
+
+## Personality & Drives
+
+**How {{char}} Operates as a Unit:**
+*   **How They Talk:** (One sentence: the group's collective communication style — do they finish each other's sentences, defer to the leader, speak in code?)
+*   **How They Move:** (One sentence: how do they present physically as a group — do they form a wall, spread out, cluster nervously?)
+*   **Collective Mood:** (One sentence: the group's prevailing emotional tone right now.)
+*   **Likes:** (3–5 things the group collectively enjoys or values.)
+*   **Dislikes:** (3–5 things they all can't stand.)
+*   **Hard Limits:** (2–3 lines the group will never cross as a unit.)
+
+# The Roleplay's Setup
+
+**Premise:**
+(Neutral third-person overview of the setting, time period, and circumstances. Explain who {{user}} is in relation to {{char}} and what situation kicks off the roleplay.)
+
+**Roleplay Mechanics & Story Steering:**
+(Provide 2-3 bullet points defining how the roleplay should unfold and how the group drives the story. What is the central conflict or progression mechanic?)
+
+# First Message
+
+(Write a group scene opening in the third-person. Introduce the group in action — show at least two members doing something distinct that reveals their personalities. Describe the environment in vivid sensory detail. {{user}}'s presence should be passive at first — they are noticed, but not yet engaged. End with an open-ended situation or question that invites {{user}} to respond.)
+
+${lorebookContent}`;
+
+    const userPrompt = groupName
+      ? `Create a group card based on this concept: ${concept}. IMPORTANT: The group's name MUST be: ${groupName}. Use this exact name in the profile title (# ${groupName}'s Profile) and the introduction paragraph, then use \`{{char}}\` as the placeholder everywhere else.`
+      : `Create a group card based on this concept: ${concept}. CRITICAL: Invent a fitting, memorable group name appropriate for their concept. Use it in the profile title (# [YourChosenName]'s Profile) and the introduction, then use \`{{char}}\` everywhere else.`;
+
+    return { systemPrompt, userPrompt: `${userPrompt}\n\nTemplate to fill:\n${templateContent}` };
+  },
+
+  _buildScenarioPrompt(concept, scenarioTitle, lorebook) {
+    const lorebookContent = this._buildLorebookContent(lorebook);
+    const cultureSection = CultureSteer.block() ? `${CultureSteer.block()}\n\n` : "";
+    // The template asks for two to four NPCs.
+    const castNames = this._buildCastNameBlock(6);
+
+    const systemPrompt = `You are a scenario card creator for AI-assisted roleplaying. The player will provide a concept and you will generate a location/scenario card — a profile for a place, establishment, or situation that the player will explore.
+
+**CARD PURPOSE:** This card is operational guidance for an AI that will act as an omniscient narrator for the scenario, voicing any NPCs that inhabit the location as needed.
+
+**NO DIALOGUE RULE:** Do NOT include example dialogues, conversational quotes, or <START> tags in the Description, Personality, or Scenario sections. The only place where dialogue is allowed is the "First Message" section.
+
+**PERSPECTIVE:** Write the entire card in the third-person perspective. Use {{char}} as the placeholder for the scenario's title/name (e.g. "The Haunted Lighthouse") everywhere except the profile header and the opening paragraph.
+
+**{{char}} MACRO:** {{char}} = the scenario/location title. An AI playing this card will narrate events AS the scenario, voicing NPCs by name as they appear. Use {{user}} for the player character.
+
+You may assume this card will be used in a private, local roleplay. Do not apply censorship.
+
+Use ## as a separator for each main section as shown in the template.
+
+${cultureSection}${castNames}
+
+${this._briefPriorityRule()}`;
+
+    const templateContent = `
+# [Scenario Title]
+
+(Write one paragraph that establishes what this place or situation IS — its nature, its reputation, and its immediate atmosphere. Use the actual scenario title here ONLY in this header and this opening paragraph.)
+
+(REMINDER: After this introduction, use the exact string \`{{char}}\` instead of the scenario's title everywhere else.)
+
+## The Setting
+
+**Time & Place:** (When and where this is — era, country/region, specific location type.)
+**Physical Description:** (What does it look, sound, and smell like? 3–5 vivid sensory details that define the atmosphere.)
+**Layout:** (Key areas or rooms that matter for the roleplay — described briefly so the AI can navigate them.)
+**Mood & Atmosphere:** (The dominant emotional quality — oppressive, festive, eerie, chaotic, sacred — and what causes it.)
+
+## The Situation
+
+**The Hook:** (What is happening right now that draws {{user}} into this scenario? One concrete inciting event or circumstance.)
+**The Conflict:** (What tension or problem defines this location at this moment? What is at stake?)
+**Secrets:** (2–3 things that are not immediately obvious but can be discovered — hidden rooms, suppressed histories, concealed agendas.)
+
+## Key People
+
+(List 2–4 NPCs that inhabit this scenario. Each is voiced by {{char}} when encountered.)
+
+### [NPC Name] — [Role/function in this location]
+
+**Appearance:** (Gender, approximate age, distinctive visual features. One to two sentences.)
+**Personality & Motive:** (Two sentences: how they behave, what they want, and what they are hiding or protecting.)
+
+(Repeat the block for each NPC.)
+
+## Rules of This World
+
+*   **What Is Normal Here:** (2–3 things that are taken for granted in this scenario's logic.)
+*   **What Is Forbidden or Dangerous:** (2–3 things that carry consequences — social, physical, or supernatural.)
+*   **What Can Change:** (2–3 things that are in flux and can be affected by {{user}}'s choices.)
+
+## Personality & Drives
+
+**The Scenario as a Force:**
+*   **Dominant Theme:** (One sentence: the central emotional or philosophical theme this scenario explores.)
+*   **Tone:** (One sentence: the tonal register — gritty noir, gothic horror, cosy mystery, high-stakes thriller, etc.)
+*   **Recurring Motifs:** (2–3 images, sounds, or sensations that recur throughout this scenario.)
+*   **What {{char}} Wants From {{user}}:** (One sentence: what the scenario "needs" from the player — to be solved, survived, escaped, transformed, or simply experienced.)
+
+# The Roleplay's Setup
+
+**Premise:**
+(Neutral third-person overview of the circumstances that bring {{user}} to this location right now. Who is {{user}} in relation to this place? What do they know, and what don't they know?)
+
+**Roleplay Mechanics & Story Steering:**
+(Provide 2-3 bullet points on how the scenario should unfold. What are the key mechanics, events, or pacing rules the AI must enforce to drive the story forward?)
+
+# First Message
+
+(Write a scene-setting opening in the third-person. Place {{user}} at the threshold of the scenario — arriving, entering, discovering. Describe the environment in vivid sensory detail. Introduce one NPC or one immediate problem that creates a reason for {{user}} to act. End with an open-ended situation that invites {{user}} to respond.)
+
+${lorebookContent}`;
+
+    const userPrompt = scenarioTitle
+      ? `Create a scenario card based on this concept: ${concept}. IMPORTANT: The scenario's title MUST be: ${scenarioTitle}. Use this exact title in the profile header (# ${scenarioTitle}) and the opening paragraph, then use \`{{char}}\` as the placeholder everywhere else.`
+      : `Create a scenario card based on this concept: ${concept}. CRITICAL: Invent a fitting, evocative title for this scenario appropriate to its concept. Use it in the profile header (# [YourChosenTitle]) and the opening paragraph, then use \`{{char}}\` everywhere else.`;
+
+    return { systemPrompt, userPrompt: `${userPrompt}\n\nTemplate to fill:\n${templateContent}` };
+  },
+
+  parseJsonFromModelOutput(output) {
+    if (!output || typeof output !== "string") {
+      throw new Error("Model output is empty");
+    }
+
+    let cleaned = output.trim();
+
+    if (cleaned.startsWith("```")) {
+      cleaned = cleaned.replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+    }
+
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) cleaned = jsonMatch[0];
+
+    // Remove invalid JSON escape characters (e.g., \', \*) which models often output for markdown
+    cleaned = cleaned.replace(/\\([^"\\/bfnrtu])/g, '$1');
+
+    try {
+      return JSON.parse(cleaned);
+    } catch (initialError) {
+      console.warn("Initial JSON parse failed, attempting auto-fix:", initialError.message);
+
+      let inString = false;
+      let isEscaped = false;
+      let fixed = "";
+
+      for (let i = 0; i < cleaned.length; i++) {
+        const char = cleaned[i];
+        if (char === '"' && !isEscaped) inString = !inString;
+        if (char === '\\' && !isEscaped) isEscaped = true;
+        else isEscaped = false;
+
+        if (inString) {
+          if (char === '\n') fixed += '\\n';
+          else if (char === '\r') fixed += '\\r';
+          else if (char === '\t') fixed += '\\t';
+          else fixed += char;
+        } else {
+          fixed += char;
+        }
+      }
+
+      try {
+        return JSON.parse(fixed);
+      } catch (secondError) {
+        if (inString) fixed += '"';
+        fixed += '}';
+        try {
+          return JSON.parse(fixed);
+        } catch (thirdError) {
+          console.error("JSON auto-fix failed. Final string length:", fixed.length);
+          throw new Error(`Failed to parse AI response as JSON: ${initialError.message}`);
+        }
+      }
+    }
+  },
+
+  async reviseCharacter(currentCharacter, revisionInstruction, pov = "third") {
+    if (!currentCharacter) throw new Error("Character is required for revision");
+    if (!revisionInstruction || !revisionInstruction.trim()) throw new Error("Revision instruction is required");
+
+    console.log("=== STARTING AI REVISION ===");
+    console.log("Instruction:", revisionInstruction);
+
+    const model = this.config.get("api.text.model");
+    const povText = pov === "third" ? "third-person" : "first-person";
+
+    const data = {
+      model,
+      messages: [
+        {
+          role: "system",
+          content: "You revise roleplay character cards. Return strict JSON only with fields: name, description, personality, scenario, firstMessage. Keep markdown formatting in fields where appropriate. **CONCISENESS RULE:** The card is AI stage-direction, not prose fiction. Keep revised output concise — tighten where possible; do not expand sections that are already clear. Use short prose for backstory/scenario; use direct bullet points for traits, behaviours, and mechanics. **CRITICAL STRUCTURE RULE:** The 'description' field MUST ONLY contain physical appearance, backstory, and current state. The 'personality' field MUST contain behavioral traits, 'How They Operate' (speech style, body language, mindset), likes, dislikes, goals, fears, and quirks. The 'scenario' field MUST outline the Premise AND include a 'Roleplay Mechanics & Story Steering' section with bullet points on how the story should unfold. **NO DIALOGUE RULE:** DO NOT include example dialogues, conversational quotes, or <START> tags in the description, personality, or scenario fields. Example dialogues are handled separately. CRITICAL RULE: The character's actual name should ONLY be in the 'name' field. In the description, personality, scenario, and firstMessage fields, you MUST use the exact string `{{char}}` whenever referring to the character by name. **CRITICAL JSON RULE:** You MUST properly escape all newlines as \\n within the JSON string values. Do NOT output literal newlines inside strings.",
+        },
+        {
+          role: "user",
+          content: (() => {
+            // Strip character_book and alternateGreetings from the revision input —
+            // the lorebook content is stored separately and should not be copied into
+            // card fields; alternateGreetings are preserved on the return value.
+            const { character_book: _book, alternateGreetings: _greetings, ...cardForRevision } = currentCharacter;
+            return `Revise the following character according to this request: ${revisionInstruction}\n\nPOV requirement: keep content in ${povText} style where it originally applies.\n\nCurrent character JSON:\n${JSON.stringify(cardForRevision, null, 2)}`;
+          })(),
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 8192,
+      stream: true,
+    };
+
+    try {
+      console.log("Sending revision request with data size:", JSON.stringify(data).length);
+      const response = await this.makeRequest("/chat/completions", data, false, true);
+      console.log("Response received, processing stream...");
+      const output = await this.handleStreamResponse(response, () => {});
+      console.log("Revision stream complete. Output length:", output?.length);
+      const parsed = this.parseJsonFromModelOutput(output);
+      console.log("Successfully parsed JSON output");
+      return {
+        name: parsed.name || currentCharacter.name || "Unnamed Character",
+        description: parsed.description || currentCharacter.description || "",
+        personality: parsed.personality || currentCharacter.personality || "",
+        scenario: parsed.scenario || currentCharacter.scenario || "",
+        firstMessage: parsed.firstMessage || currentCharacter.firstMessage || "",
+        mesExample: parsed.mesExample || parsed.mes_example || currentCharacter.mesExample || "",
+        creatorNotes: currentCharacter.creatorNotes || "",
+        postHistoryInstructions: currentCharacter.postHistoryInstructions || "",
+        tags: Array.isArray(currentCharacter.tags) ? currentCharacter.tags : [],
+        cardType: currentCharacter.cardType || "single",
+        character_book: currentCharacter.character_book,
+        alternateGreetings: currentCharacter.alternateGreetings,
+      };
+    } catch (error) {
+      console.error("=== REVISION FAILED ===", error);
+      throw error;
+    }
+  },
+
+  // Exposes the persistent recently-generated-name history to other modules
+  // (e.g. the character parser records each freshly-generated name here).
+  recordGeneratedName(name) {
+    if (name && name !== "{{char}}" && name !== "Unknown Character") {
+      NameGenShared.recordNames([name]);
+    }
+  },
+
+  /**
+   * Can the local name bank serve this combination of picker options? If it
+   * can, generateNameOptions answers from real name data with no API call at
+   * all — instant, free, and with a no-repeat guarantee the model can't give.
+   *
+   * It can't when the user asked for a culture the bank doesn't hold ("Any
+   * culture"), a non-human name style (demon, alien, elf, fae, angel), an era
+   * outside the source data (ancient, medieval, renaissance, far future,
+   * fantasy), or when they typed guidance — guidance is a free-text instruction
+   * only the model can interpret.
+   */
+  _nameBankCanServe({ origin, type, timePeriod, guidance }) {
+    if (origin === "global") return false;
+    if (guidance && guidance.trim()) return false;
+    return NameBank.supportsType(type) && NameBank.supportsPeriod(timePeriod);
+  },
+
+  /**
+   * Generates 10 varied name options for the Name Generator modal.
+   *
+   * Returns { names, source, note } — `source` is "bank" when the names came
+   * from the local data and "model" when the model generated them, so the UI
+   * can tell the user which they're looking at.
+   */
+  async generateNameOptions(character, gender = "any", type = "any", timePeriod = "any", guidance = "", previousNames = [], origin = null) {
+    if (!character) throw new Error("Character is required to generate name options");
+
+    const cultureMode = origin || CultureSteer.mode();
+
+    if (this._nameBankCanServe({ origin: cultureMode, type, timePeriod, guidance })) {
+      const { names, detail } = NameBank.draw({
+        gender,
+        period: timePeriod,
+        origin: cultureMode,
+        count: 10,
+        exclude: previousNames,
+      });
+      if (names.length) {
+        // Which traditions actually came up, so the list isn't a black box.
+        const regions = [...new Set(detail.map((d) => NameBank.regionLabel(d.region)))];
+        return {
+          names,
+          source: "bank",
+          note: `Real names — ${regions.join(", ")}`,
+        };
+      }
+      // Pools exhausted against the exclusion list: fall through to the model
+      // rather than returning nothing.
+    }
+
+    const model = this.config.get("api.text.model");
+
+    // Cultural traditions pool for the model-driven path, narrowed to the
+    // Western subset unless the user asked for any culture.
+    const basePool = NameGenShared.traditionsFor(cultureMode);
+
+    // Supplementary pool for supernatural types
+    const supernaturalPool = [
+      "Ancient Sumerian or Akkadian",
+      "Ancient Egyptian (pharaonic era)",
+      "Ancient Greek or Mycenaean",
+      "Hebrew or Enochian angelological tradition (Uriel, Raphael as phonetic style references)",
+      "Latin demonological tradition (Ars Goetia phonetics — Bael, Marchosias as style references)",
+      "Old Norse or Proto-Germanic",
+      "Ancient Sanskrit or early Vedic",
+      "Invented — exotic alien phonetics with unusual consonant clusters",
+      "Invented — soft flowing elven-style phonetics",
+      "Invented — harsh guttural infernal phonetics",
+    ];
+
+    // Select the right pool mix based on type
+    let pool;
+    if (["demon"].includes(type)) {
+      pool = [...supernaturalPool, ...basePool.slice(0, 15)];
+    } else if (["angel"].includes(type)) {
+      pool = [...supernaturalPool.slice(0, 6), ...basePool.slice(0, 20)];
+    } else if (["alien"].includes(type)) {
+      pool = [...supernaturalPool.slice(6), ...basePool.filter(s =>
+        ["Japanese", "Finnish", "Vietnamese", "Mongolian", "Mesoamerican", "Korean", "Filipino"].some(k => s.includes(k))
+      ), ...basePool];
+    } else if (["elf", "fae"].includes(type)) {
+      const elvish = basePool.filter(s =>
+        ["Celtic", "Scandinavian", "Finnish", "Baltic", "Greek", "Iberian", "Armenian"].some(k => s.includes(k))
+      );
+      pool = [...elvish, ...basePool];
+    } else {
+      pool = basePool;
+    }
+
+    // Shuffle and deduplicate, take 10
+    const shuffled = pool.slice().sort(() => Math.random() - 0.5);
+    const chosenStyles = [...new Map(shuffled.map(s => [s, s])).values()].slice(0, 10);
+    const styleList = chosenStyles.map((s, i) => `${i + 1}. ${s}`).join("\n");
+
+    // Gender
+    const genderMap = {
+      male: "All names must be masculine.",
+      female: "All names must be feminine.",
+      other: "All names must be gender-neutral or androgynous.",
+    };
+    const genderInstruction = genderMap[gender] || "Gender can vary freely across the 10 names.";
+
+    // Character type
+    const typeMap = {
+      vampire:        "CHARACTER TYPE — Vampire: Names should have an elegant, slightly archaic quality. Eastern European, Western European, and Middle Eastern origins work particularly well. Avoid obviously modern or youthful names.",
+      demon:          "CHARACTER TYPE — Demon: Names should sound distinctly non-human. Ancient languages (Sumerian, Akkadian, Enochian, Latin demonology) and invented phonetics are all valid. Unusual consonant clusters are fine. Names do not need to be easy for Western speakers.",
+      angel:          "CHARACTER TYPE — Angel: Hebrew, Greek, and Latin angelological traditions are most appropriate. Names ending in -iel, -ael, or -el ARE correct and expected — the normal ban on these endings does NOT apply for angels.",
+      elf:            "CHARACTER TYPE — Elf: Names should be flowing, musical, multi-syllable. Celtic, Nordic, Finnish traditions work well. Names ending in -iel or -ael are acceptable for elves.",
+      fae:            "CHARACTER TYPE — Fae / Fairy: Names should be whimsical, nature-inspired, often short or musical. Celtic and Irish traditions ideal. Unusual but melodic sounds encouraged.",
+      anthropomorphic:"CHARACTER TYPE — Anthropomorphic: Talking animal or furry character. Regular human names or slightly nature/animal-inspired names both work well.",
+      werewolf:       "CHARACTER TYPE — Werewolf / Shifter: They live as humans, so regular human names are correct. Germanic, Norse, Slavic, and Celtic traditions fit the folklore particularly well.",
+      ghost:          "CHARACTER TYPE — Ghost / Spirit: They retain the names they had in life. Use period-authentic names that feel historical and grounded.",
+      alien:          "CHARACTER TYPE — Alien: Names should feel distinctly non-human while remaining pronounceable. Favour the most phonetically unusual traditions or invent names with rare phoneme combinations.",
+      undead:         "CHARACTER TYPE — Undead: They retain their living names. Period-appropriate names with a slightly archaic feel.",
+      witch:          "CHARACTER TYPE — Witch / Mage: Can be from any tradition — historical, exotic, or slightly unusual. Some witches use craft names distinct from birth names.",
+    };
+    const typeInstruction = typeMap[type] ? `\n\n${typeMap[type]}` : "\n\nCHARACTER TYPE — Human: Use authentic real-world names from the assigned cultural traditions.";
+
+    // Time period
+    const periodMap = {
+      ancient:      "TIME PERIOD — Ancient (pre-500 AD): Names must feel authentic to ancient cultures — Mesopotamian, Egyptian, Greek, Roman, Celtic Iron Age, Han Dynasty, Vedic India, etc.",
+      medieval:     "TIME PERIOD — Medieval (500–1400 AD): Period-authentic — Old English, Old French, Norse, Slavic, Arabic, Japanese feudal, etc. Avoid obviously modern sounds.",
+      renaissance:  "TIME PERIOD — Renaissance / Early Modern (1400–1700): Names fitting the 15th–17th century globally.",
+      victorian:    "TIME PERIOD — Victorian era (1800s): 19th-century names from across the world.",
+      "early-20th": "TIME PERIOD — Early 20th century (1900–1950).",
+      "mid-20th":   "TIME PERIOD — Mid-to-late 20th century (1950–1990).",
+      contemporary: "TIME PERIOD — Contemporary / modern day (1990s–2020s). Names should feel current.",
+      "near-future":"TIME PERIOD — Near future (2030–2100). Names feel slightly futuristic but grounded in today's trends.",
+      "far-future": "TIME PERIOD — Far future / sci-fi. Names can be invented and genuinely futuristic.",
+      fantasy:      "TIME PERIOD — Fantasy setting. No real-world era constraint — blend historical periods freely.",
+    };
+    const periodInstruction = periodMap[timePeriod] ? `\n\n${periodMap[timePeriod]}` : "";
+
+    // Ban names shown earlier in this modal session AND names generated in
+    // past sessions (persisted via NameGenShared), so a reroll or a fresh
+    // modal open for a different character still avoids recent repeats.
+    const allPreviousNames = [...new Set([...previousNames, ...NameGenShared.recentNames()])].slice(-40);
+
+    const guidanceInstruction = guidance
+      ? `\n\nAdditional guidance from user: "${guidance}" — this is your PRIMARY instruction. If it specifies a cultural style, use that style for all 10 names.`
+      : "";
+
+    // The cultural default applies to human names only: a demon or an alien is
+    // supposed to be named from ancient or invented phonetics, and telling the
+    // model "British Isles only" in the same breath would contradict that.
+    const cultureNote = (cultureMode === "global" || !NameBank.supportsType(type))
+      ? ""
+      : `\n\n**CULTURAL DEFAULT:** Unless the user's guidance says otherwise, all names must come from ${CultureSteer.REGIONS[cultureMode]}. If the user's guidance names a different culture, the guidance wins.`;
+
+    const systemPrompt = `You are an expert in names from cultures around the world. Generate exactly 10 character names.${typeInstruction}${periodInstruction}${cultureNote}
+
+${genderInstruction}
+
+**GUIDANCE IS YOUR PRIMARY INSTRUCTION.** If the user's guidance specifies a cultural origin, nationality, style, or feel (e.g. "Classic English Names", "French nobility", "Japanese", "Viking"), ALL 10 names must follow that direction. In this case, use the cultural tradition list only as inspiration for variety within the requested culture — do not override the user's guidance with unrelated traditions.
+
+If no cultural guidance is given, use the tradition list to produce maximum variety: each name must authentically come from its assigned tradition.
+
+${NameGenShared.AUTHENTICITY_GUARD}
+
+${NameGenShared.AVOID_DEFAULT_GUARD}
+
+**Banned overused AI defaults — only apply this ban when NO specific cultural guidance is given. If the user has requested a style that includes these names, authentic examples from that tradition are fine:**
+${NameGenShared.BANNED_NAMES_BLOCK}${allPreviousNames.length > 0 ? `\n\n**PREVIOUSLY SHOWN — do NOT repeat any of these, the user wants entirely fresh options:**\n${allPreviousNames.map(n => `"${n}"`).join(", ")}` : ""}
+
+Return ONLY a strict JSON array of exactly 10 strings. No objects, no explanations.
+Example: ["Yuki Tanaka", "Kofi Mensah", "Ingrid Halvorsen", "Mirela Petrović", ...]`;
+
+    const traditionNote = guidance
+      ? `Cultural traditions (use as variety guide within the user's requested style, not as overrides):\n${styleList}`
+      : `Cultural traditions to draw from (one per name, in order):\n${styleList}`;
+
+    const userPrompt = `Character context:
+${character.description ? `Description: ${character.description.substring(0, 300)}` : "No description provided"}
+${character.name && character.name !== "{{char}}" && character.name !== "Unknown Character" ? `Current name: "${character.name}" (do NOT use this again)` : ""}${guidanceInstruction}
+
+${traditionNote}
+
+Generate exactly 10 names as a JSON array. Make each name as different from the others as possible.
+[Entropy: ${Math.floor(Math.random() * 2000000)}]`;
+
+    const data = {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      // Must emit a clean JSON array; 1.0 risked commentary and format drift.
+      temperature: 0.85,
+      max_tokens: 350,
+      stream: false,
+    };
+
+    try {
+      console.log("=== STARTING NAME OPTIONS GENERATION ===");
+      const response = await this.makeRequest("/chat/completions", data, false, false);
+      const output = this.processNormalResponse(response);
+
+      let parsed;
+      try {
+        parsed = JSON.parse(output);
+      } catch (e) {
+        const arrayMatch = output.match(/\[[\s\S]*\]/);
+        if (arrayMatch) parsed = JSON.parse(arrayMatch[0]);
+        else throw new Error("Could not parse name list from response");
+      }
+
+      if (!Array.isArray(parsed)) throw new Error("Response was not an array");
+
+      const names = parsed
+        .slice(0, 10)
+        .map((n) => String(n).trim().replace(/^["']|["']$/g, ""))
+        .filter(Boolean);
+
+      NameGenShared.recordNames(names);
+      return { names, source: "model", note: "AI-generated names" };
+    } catch (error) {
+      console.error("=== NAME OPTIONS GENERATION FAILED ===", error);
+      throw error;
+    }
+  },
+
+  formatLorebookContext(lorebookEntries) {
+    if (!lorebookEntries || !Array.isArray(lorebookEntries) || lorebookEntries.length === 0) return "";
+    let context = "\n\nAvailable World Info / Lorebook Context (Use this to inform your generation. Try to naturally include some of the exact 'Keys' below in your text so they trigger during the roleplay):\n";
+    lorebookEntries.forEach((entry) => {
+      if (entry.enabled !== false && entry.keys && entry.keys.length > 0) {
+        context += `- Keys: [${entry.keys.join(", ")}] | Content: ${entry.content}\n`;
+      }
+    });
+    return context;
+  },
+
+  /**
+   * Returns a compact lorebook context listing only trigger keys — NOT entry content.
+   * Use this when regenerating individual card fields (scenario, firstMessage, etc.)
+   * so the AI knows which keywords to weave in without having full lorebook text
+   * available to copy verbatim into the card.
+   */
+  formatLorebookKeysContext(lorebookEntries) {
+    if (!lorebookEntries || !Array.isArray(lorebookEntries) || lorebookEntries.length === 0) return "";
+    const allKeys = [];
+    lorebookEntries.forEach((entry) => {
+      if (entry.enabled !== false && entry.keys && entry.keys.length > 0) {
+        allKeys.push(...entry.keys);
+      }
+    });
+    if (allKeys.length === 0) return "";
+    const uniqueKeys = [...new Set(allKeys)];
+    return `\n\nLorebook trigger keywords — weave these naturally into your text so they activate lorebook entries during roleplay. Do NOT copy or paraphrase lorebook content into this field; just ensure these words appear organically: ${uniqueKeys.join(", ")}`;
+  },
+
+  async regenerateField(character, field, customPrompt = "", pov = "third", lorebookEntries = []) {
+    if (!character) throw new Error("Character is required");
+
+    const model = this.config.get("api.text.model");
+    const povText = pov === "third" ? "third-person" : "first-person";
+    const charName = character.name || "{{char}}";
+
+    let fieldName;
+    switch (field) {
+      case 'description': fieldName = "Description (Physical Appearance, Story/Background, and Current State)"; break;
+      case 'personality': fieldName = "Personality (How They Operate, Mindset, Likes, Dislikes, Goals, Fears, and Quirks)"; break;
+      case 'scenario': fieldName = "Scenario/Setting (including Premise and Roleplay Mechanics & Story Steering)"; break;
+      case 'firstMessage': fieldName = "First Message/Greeting"; break;
+      default: throw new Error("Invalid field specified");
+    }
+
+    const systemPrompt = `You are an expert character creator. Your task is to rewrite ONLY the "${fieldName}" section for the roleplay character "${charName}".
+Write in ${povText} perspective where appropriate.
+DO NOT output full markdown blocks for other sections, ONLY the revised content for the requested section. Do not use <START> tags.
+**NO DIALOGUE RULE:** Do not include any dialogue examples or conversational quotes in this section (unless rewriting the First Message).
+**CRITICAL RULE:** Do NOT use the character's actual name. You MUST use the exact macro string \`{{char}}\` instead of their name in the generated text.`;
+
+    const customInstruction = customPrompt
+      ? `\nCRITICAL INSTRUCTION FOR THIS SECTION: ${customPrompt}`
+      : `\nRevise and improve this section to be more detailed, engaging, and consistent with the rest of the character.`;
+
+    const lorebookContext = this.formatLorebookKeysContext(lorebookEntries);
+    const userPrompt = `Character Profile Context:
+Name: ${charName}
+Description: ${character.description}
+Personality: ${character.personality}
+Scenario: ${character.scenario}${lorebookContext}
+
+Please REWRITE the ${fieldName} section.${customInstruction}
+
+Output ONLY the new ${fieldName} content without surrounding explanation.`;
+
+    const data = {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.8,
+      max_tokens: 2000,
+      stream: true,
+    };
+
+    try {
+      console.log(`=== STARTING FIELD REGENERATION: ${field} ===`);
+      const response = await this.makeRequest("/chat/completions", data, false, true);
+      const output = await this.handleStreamResponse(response, () => {});
+      console.log(`${field} regenerated successfully`);
+      return output.trim().replace(/^```(?:markdown)?\n?/i, "").replace(/```$/i, "").trim();
+    } catch (error) {
+      console.error(`=== FIELD REGENERATION FAILED: ${field} ===`, error);
+      throw error;
+    }
+  },
+
+  async generateExampleMessages(character, count = 3, pov = "third", customPrompt = "", lorebookEntries = [], brief = "") {
+    if (!character) throw new Error("Character is required for example message generation");
+
+    const model = this.config.get("api.text.model");
+    const povText = pov === "third" ? "third-person" : "first-person";
+    const charName = character.name || "{{char}}";
+
+    const systemPrompt = `You are an expert at writing example dialogue messages for roleplay characters. These examples help define how a character speaks and behaves. Write in ${povText} perspective for the character.
+
+Your task: Generate ${count} example dialogue message(s) for the character. Each example should:
+1. Be a ONE-LINER - a single line of dialogue with minimal prose/action if needed
+2. Show the character's unique voice, speech patterns, and personality
+3. Include {{char}}'s spoken dialogue, optionally with brief action/description
+4. Use proper formatting with <START> tags as separators
+
+Format your response EXACTLY like this:
+<START>
+{{char}}: [dialogue with optional brief action]
+<START>
+{{char}}: [different dialogue showing another aspect of personality]
+<START>
+{{char}}: [yet another dialogue example]
+
+IMPORTANT:
+- Each example must be a SINGLE line of dialogue, not multiple paragraphs
+- Include brief prose/action tags only when necessary to convey context
+- Keep the character's name as {{char}} in the output
+- Do NOT include any explanations, headers, or additional text - ONLY the formatted examples
+- Generate exactly ${count} example(s)`;
+
+    const customPromptInstruction = customPrompt
+      ? `\nCRITICAL INSTRUCTION FOR THIS GENERATION: The user has requested the following specific style/tone for these messages: "${customPrompt}". Ensure the examples strongly reflect this request.`
+      : "";
+
+    const lorebookContext = this.formatLorebookKeysContext(lorebookEntries);
+    const userPrompt = `Character Name: ${charName}
+
+Character Description:
+${character.description || "No description provided"}
+
+Character Personality:
+${character.personality || "No personality provided"}
+
+First Message (for reference on voice/style):
+${character.firstMessage || "No first message provided"}${lorebookContext}${this._briefContextBlock(brief, "match any tone, pacing or style requirements it states")}
+
+Generate ${count} example dialogue message(s) for this character. Remember: one-liners, varied contexts, ${povText} perspective.${customPromptInstruction}`;
+
+    const data = {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.8,
+      max_tokens: 1024,
+      stream: true,
+    };
+
+    try {
+      console.log("=== STARTING EXAMPLE MESSAGES GENERATION ===");
+      const response = await this.makeRequest("/chat/completions", data, false, true);
+      const output = await this.handleStreamResponse(response, () => {});
+      console.log("Example messages generated successfully");
+      return output.trim();
+    } catch (error) {
+      console.error("=== EXAMPLE MESSAGES GENERATION FAILED ===", error);
+      throw error;
+    }
+  },
+
+  async generateTags(character) {
+    if (!character) throw new Error("Character is required to generate tags");
+    const model = this.config.get("api.text.model");
+
+    const systemPrompt = `You are a tagging assistant for SillyTavern character cards. Analyse the character and output a JSON array of concise, lowercase tags that describe the character. Tags should cover:
+- Gender (e.g. "female", "male", "non-binary")
+- Species / race if not human (e.g. "elf", "android", "vampire")
+- Setting / genre (e.g. "fantasy", "sci-fi", "modern", "historical", "post-apocalyptic")
+- Personality archetype (e.g. "tsundere", "mentor", "villain", "anti-hero")
+- Occupation or role (e.g. "detective", "witch", "soldier")
+- Notable traits (e.g. "sarcastic", "loyal", "mysterious")
+- Content tone (e.g. "romance", "action", "comedy", "dark", "wholesome")
+
+Rules:
+- Output ONLY a valid JSON array of strings, nothing else.
+- 5–12 tags total.
+- All lowercase, no special characters except hyphens.
+- No tag longer than 25 characters.`;
+
+    const userPrompt = `Name: ${character.name || "Unknown"}
+Description: ${(character.description || "").slice(0, 800)}
+Personality: ${(character.personality || "").slice(0, 400)}
+Scenario: ${(character.scenario || "").slice(0, 300)}
+First message: ${(character.firstMessage || "").slice(0, 300)}
+
+Output a JSON array of tags only.`;
+
+    const data = {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      // Classification against a closed vocabulary — creativity is corruption.
+      temperature: 0.2,
+      max_tokens: 150,
+      stream: false,
+    };
+
+    try {
+      const response = await this.makeRequest("/chat/completions", data, false, false);
+      const output = this.processNormalResponse(response);
+      let parsed;
+      try {
+        parsed = JSON.parse(output);
+      } catch (e) {
+        const arrayMatch = output.match(/\[[\s\S]*?\]/);
+        if (arrayMatch) parsed = JSON.parse(arrayMatch[0]);
+        else throw new Error("Could not parse tags from response");
+      }
+      if (!Array.isArray(parsed)) throw new Error("Response was not an array");
+      return parsed.map(t => String(t).trim().toLowerCase()).filter(Boolean).slice(0, 12);
+    } catch (error) {
+      console.error("=== TAG GENERATION FAILED ===", error);
+      throw error;
+    }
+  },
+
+  async generateCreatorNotes(character, customPrompt = "", brief = "") {
+    if (!character) throw new Error("Character is required to generate creator notes");
+    const model = this.config.get("api.text.model");
+    const charName = character.name || "the character";
+
+    const systemPrompt = `You write short, punchy "Creator's Notes" blurbs for SillyTavern character cards. These appear on card-sharing websites and must instantly hook a reader.
+
+Rules:
+- 2–4 sentences max. No more.
+- Use the character's ACTUAL name (not {{char}} or {{user}}).
+- Open with who the character is — make it intriguing, not bland.
+- Mention the core scenario or hook.
+- End with a light tease of what interacting with them offers (tension, romance, mystery, humour, etc.).
+- Write in present tense, third person, active voice.
+- No hashtags, no lists, no headers — just plain compelling prose.
+- Do NOT start with "Meet" or "Introducing". Be more creative.`;
+
+    let userPrompt = `Character name: ${charName}
+
+Description (excerpt):
+${(character.description || "").slice(0, 600)}
+
+Personality (excerpt):
+${(character.personality || "").slice(0, 400)}
+
+Scenario:
+${(character.scenario || "").slice(0, 500)}
+
+First message (for tone reference):
+${(character.firstMessage || "").slice(0, 300)}${this._briefContextBlock(brief, "use it to convey the intended tone and style of play")}
+
+Write the Creator's Notes blurb now. Plain text only, no formatting.`;
+
+    if (customPrompt && customPrompt.trim()) {
+      userPrompt += `\n\nCRITICAL INSTRUCTION FOR THIS GENERATION: ${customPrompt.trim()}`;
+    }
+
+    const data = {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.85,
+      max_tokens: 256,
+      stream: false,
+    };
+
+    try {
+      const response = await this.makeRequest("/chat/completions", data, false, false);
+      return this.processNormalResponse(response).trim();
+    } catch (error) {
+      console.error("=== CREATOR NOTES GENERATION FAILED ===", error);
+      throw error;
+    }
+  },
+
+  async generatePostHistoryInstructions(character, customPrompt = "", brief = "") {
+    if (!character) throw new Error("Character is required to generate post-history instructions");
+    const model = this.config.get("api.text.model");
+
+    const systemPrompt = `Write a condensed lexical response style for a reusable character card.
+Use first person, 20–45 words, plain text. Specify diction, cadence, register, humor,
+emotional coloring, and prose rhythm supported by the character's personality.
+Do not add scenario mechanics, plot objectives, biography, dominance requirements,
+or claims about {{user}}. Do not copy the character's name. This is voice guidance,
+not a summary of the scenario. Style requests may refine the voice but not change this scope.`;
+    let userPrompt = `Character voice and personality:\n${character.personality || ""}\n
+Existing lexical style:\n${character.postHistoryInstructions || ""}\n
+Condense the voice into one or two first-person sentences.`;
+
+    if (customPrompt && customPrompt.trim()) {
+      userPrompt += `\n\nCRITICAL INSTRUCTION FOR THIS GENERATION: ${customPrompt.trim()}`;
+    }
+
+    const data = {
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 150,
+      stream: false,
+    };
+
+    try {
+      const response = await this.makeRequest("/chat/completions", data, false, false);
+      return this.processNormalResponse(response).trim();
+    } catch (error) {
+      console.error("=== POST-HISTORY GENERATION FAILED ===", error);
+      throw error;
+    }
+  },
+
+  /* ── Inspire Me — Idea Generation ──────────────────────────────────────── */
+
+  /**
+   * Generate 4 high-level character ideas based on user filters.
+   * Used by the Inspire Me mode's Stage 1 (idea spark).
+   */
+  async generateInspireIdeas(filters) {
+    const prompt = this.buildInspireIdeasPrompt(filters);
+    const model = this.config.get("api.text.model") || "glm-4-6";
+
+    const data = {
+      model: model,
+      messages: [
+        { role: "system", content: prompt.systemPrompt },
+        { role: "user", content: prompt.userPrompt },
+      ],
+      temperature: 0.9,
+      max_tokens: 2048,
+      stream: false,
+    };
+
+    const response = await this.makeRequest("/chat/completions", data, false, false);
+    return this.processNormalResponse(response);
+  },
+
+  /**
+   * Build the system + user prompts for brainstorming 4 character ideas.
+   */
+  buildInspireIdeasPrompt(filters) {
+    const genderMap = {
+      any: "any gender identity",
+      male: "male",
+      female: "female",
+      genderless: "genderless, non-binary, or agender",
+    };
+    const orientationMap = {
+      any: "any sexual/romantic orientation — do not assume or restrict attraction",
+      heterosexual: "heterosexual — attracted to the opposite gender only",
+      homosexual: "homosexual (gay/lesbian) — attracted to the same gender only",
+      bisexual: "bisexual or pansexual — attracted to people regardless of gender",
+      asexual: "asexual or aromantic — experiences little or no romantic/sexual attraction",
+    };
+    const nsfwMap = {
+      sfw: "The ideas MUST be strictly SFW / safe for work.",
+      nsfw: "NSFW themes are allowed if the concept calls for it.",
+      any: "No content restrictions.",
+    };
+
+    const systemPrompt = [
+      "You are a creative character-concept brainstormer for a roleplaying-card generator. Your job is to generate 4 unique, compelling character ideas based on user-specified filters.",
+      "",
+      "Each idea must be a STRICTLY FORMATTED single line like this:",
+      "N. **Character Name/Title** — Two to three sentences describing the character's core concept, their defining trait or internal conflict, and the kind of story or scenario they belong in.",
+      "",
+      "RULES:",
+      "- Generate exactly 4 ideas, numbered 1 through 4.",
+      `- Gender identity: ${genderMap[filters.gender] || "any gender identity"}.`,
+      `- Sexual/romantic orientation: ${orientationMap[filters.orientation] || orientationMap.any}. IMPORTANT — this is separate from gender identity. The character's orientation determines who they are attracted to, not their own gender.`,
+      `- ${nsfwMap[filters.nsfw] || "No content restrictions."}`,
+      filters.genre !== "any" ? `- Genre / setting: ${filters.genre}.` : "- No particular genre restriction.",
+      CultureSteer.ideasBlock(),
+      filters.trope ? `- Consider the trope/archetype direction: ${filters.trope}.` : "",
+      "- Be wildly creative and diverse — each idea should feel distinct in tone, setting, and concept.",
+      "- Avoid cliches unless using them in an intentionally fresh or subversive way.",
+      "- Each description must be exactly 2-3 sentences. No bullet points, no markdown beyond the bolded name.",
+      "- Output ONLY the 4 numbered ideas, nothing else — no preamble, no closing remarks.",
+    ].filter(Boolean).join("\n");
+
+    const userPrompt = filters.theme
+      ? `Theme / direction: ${filters.theme}\n\nGenerate 4 character ideas based on the above theme. Make them distinct and surprising.`
+      : "Generate 4 original character ideas. Surprise me with unexpected concepts! Make them diverse in genre, tone, and character type.";
+
+    return { systemPrompt, userPrompt };
+  },
+
+  /* ── Batch Generate — Idea Spark ───────────────────────────────────────── */
+
+  /**
+   * Generate 4 quick-paragraph character ideas from the user's freeform concept.
+   * Used by "Generate 4" Stage 1 on the main character generator screen.
+   */
+  async generateBatchIdeas(concept, referenceImageDescription, cardType) {
+    const prompt = this.buildBatchIdeasPrompt(concept, referenceImageDescription, cardType);
+    const model = this.config.get("api.text.model") || "glm-4-6";
+
+    const data = {
+      model,
+      messages: [
+        { role: "system", content: prompt.systemPrompt },
+        { role: "user", content: prompt.userPrompt },
+      ],
+      temperature: 0.9,
+      max_tokens: 2048,
+      stream: false,
+    };
+
+    const response = await this.makeRequest("/chat/completions", data, false, false);
+    return this.processNormalResponse(response);
+  },
+
+  /**
+   * Build the system + user prompts for brainstorming 4 takes on one concept.
+   */
+  buildBatchIdeasPrompt(concept, referenceImageDescription, cardType) {
+    const cardTypeLabel = cardType === "group" ? "character group" : cardType === "scenario" ? "scenario" : "character";
+
+    const systemPrompt = [
+      `You are a creative character-concept brainstormer for a roleplaying-card generator. Your job is to take the user's ${cardTypeLabel} concept and generate 4 genuinely distinct takes on it.`,
+      "",
+      "Each idea must be a STRICTLY FORMATTED single line like this:",
+      "N. **Character Name/Title** — Two to three sentences describing the character's core concept, their defining trait or internal conflict, and the kind of story or scenario they belong in.",
+      "",
+      "RULES:",
+      "- Generate exactly 4 ideas, numbered 1 through 4.",
+      "- Every idea must stay true to the user's concept below, but take it in a meaningfully different direction — vary the personality, backstory angle, or twist (and the tone, but only if the user hasn't specified one). Do NOT just reword the same idea four times.",
+      "- Treat any explicit requirements in the concept as FIXED across all 4 ideas — for example pacing or length of play (fast-paced, short scenes, slow-burn), tone or genre, point of view, content limits, setting, or the character's relationship to the player. Diverge only on what the user left open, and let each idea's description reflect those requirements.",
+      "- Be wildly creative and diverse — each idea should feel distinct, not interchangeable.",
+      CultureSteer.ideasBlock(),
+      "- Each description must be exactly 2-3 sentences. No bullet points, no markdown beyond the bolded name.",
+      "- Output ONLY the 4 numbered ideas, nothing else — no preamble, no closing remarks.",
+    ].filter(Boolean).join("\n");
+
+    let userPrompt = concept
+      ? `Character concept: ${concept}`
+      : "No text concept was given — base the ideas entirely on the visual reference description below.";
+    if (referenceImageDescription) {
+      userPrompt += `\n\nVisual reference description: ${referenceImageDescription}`;
+    }
+    userPrompt += "\n\nGenerate 4 distinct character ideas based on the above. Make them feel like genuinely different directions, not variations of one idea.";
+
+    return { systemPrompt, userPrompt };
+  },
+
+});

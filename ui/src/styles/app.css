@@ -196,6 +196,27 @@
 }
 .engine-pill:hover { border-color: var(--line-bright); color: var(--text); }
 
+.studio-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  height: 36px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: border-color var(--dur-fast), color var(--dur-fast);
+}
+.studio-link:hover { border-color: var(--line-bright); color: var(--text); }
+.studio-link svg {
+  width: 16px; height: 16px; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
 .offline-chip {
   padding: var(--s1) var(--s3);
   border-radius: var(--r-full);
@@ -1213,6 +1234,8 @@ select {
   /* Hide the label, not the dot beside it — both are spans. */
   .engine-pill > span:not(.dot) { display: none; }
   .engine-pill { width: 36px; padding: 0; justify-content: center; }
+  .studio-link > span { display: none; }
+  .studio-link { width: 36px; padding: 0; justify-content: center; }
   .topbar-actions { flex: none; }
   .offline-chip { display: none; }
 
@@ -1280,11 +1303,13 @@ select {
 
 .brand,
 .engine-pill,
+.studio-link,
 .avatar {
   position: relative;
 }
 .brand::after,
 .engine-pill::after,
+.studio-link::after,
 .avatar::after {
   content: "";
   position: absolute;
@@ -1295,8 +1320,9 @@ select {
   height: var(--touch);
   transform: translateY(-50%);
 }
-/* The pill and avatar are also narrow once the label is hidden. */
+/* The pills and avatar are also narrow once the label is hidden. */
 .engine-pill::after,
+.studio-link::after,
 .avatar::after {
   left: 50%;
   right: auto;

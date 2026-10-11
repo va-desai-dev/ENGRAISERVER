@@ -1,0 +1,475 @@
+// Image Gallery / Lightbox Module — extends CharacterGeneratorApp prototype
+// Full-screen image viewer with zoom, pan, keyboard nav, and download
+Object.assign(CharacterGeneratorApp.prototype, {
+
+  /* ── State ──────────────────────────────────────────────────────────────── */
+  _galleryImages: [],      // Array of { url, prompt, model, label, index }
+  _galleryCurrentIdx: 0,
+  _galleryScale: 1,
+  _galleryPanX: 0,
+  _galleryPanY: 0,
+  _galleryIsPanning: false,
+  _galleryPanStartX: 0,
+  _galleryPanStartY: 0,
+  _galleryPanOrigX: 0,
+  _galleryPanOrigY: 0,
+
+  /* ── Open / Close ──────────────────────────────────────────────────────── */
+
+  // context: 'card' (default — "Use This" applies to this.currentImageUrl),
+  // 'reference' (applies to this.referenceImageDataUrl instead), or
+  // 'galleryPending' (an unsaved Gallery Generate candidate — see
+  // _renderGalleryGeneratePreview in character-gallery-panel.js). Needed
+  // because the gallery's own "Use This" button (_galleryUse) is a
+  // separate accept path from the compare-and-choose card's own click
+  // handler, and was hardcoded to the card image — see _galleryUse() for
+  // the branch. 'galleryPending' also reveals a Discard button so a
+  // candidate can be accepted/rejected at full size, not just from its
+  // small thumbnail.
+  openGallery(images, startIdx = 0, context = 'card') {
+    if (!images || images.length === 0) return;
+    this._galleryImages = images;
+    this._galleryContext = context;
+    this._galleryCurrentIdx = Math.max(0, Math.min(startIdx, images.length - 1));
+    this._galleryScale = 1;
+    this._galleryPanX = 0;
+    this._galleryPanY = 0;
+
+    const overlay = document.getElementById("gallery-lightbox");
+    if (!overlay) return;
+    overlay.classList.add("show");
+    document.body.style.overflow = "hidden";
+    overlay.setAttribute("aria-hidden", "false");
+
+    const useBtn = document.getElementById("gallery-use-btn");
+    if (useBtn) {
+      useBtn.title = context === 'reference' ? "Use This as the Reference Image"
+        : context === 'galleryPending' ? "Add This Image to the Gallery"
+        : context === 'playgroundLibrary' ? "Start a New Character from This Image"
+        : "Use This Image for Card";
+      useBtn.textContent = context === 'galleryPending' ? "Add to Gallery"
+        : context === 'playgroundLibrary' ? "New Character"
+        : "Use This";
+    }
+    const discardBtn = document.getElementById("gallery-lightbox-discard-btn");
+    if (discardBtn) discardBtn.style.display = context === 'galleryPending' ? "" : "none";
+
+    this._renderGalleryImage();
+    this._bindGalleryEvents();
+    this._updateGalleryCounter();
+  },
+
+  closeGallery() {
+    const overlay = document.getElementById("gallery-lightbox");
+    if (!overlay) return;
+    
+    // Remove focus from any gallery buttons to prevent ARIA warnings when hidden
+    if (document.activeElement && overlay.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
+    
+    overlay.classList.remove("show");
+    document.body.style.overflow = "";
+    overlay.setAttribute("aria-hidden", "true");
+    this._unbindGalleryEvents();
+  },
+
+  /* ── Render ────────────────────────────────────────────────────────────── */
+
+  _renderGalleryImage() {
+    const img = this._galleryImages[this._galleryCurrentIdx];
+    if (!img) return;
+
+    const imgEl = document.getElementById("gallery-image");
+    const metaEl = document.getElementById("gallery-meta");
+    if (!imgEl || !metaEl) return;
+
+    // Reset transform
+    this._galleryScale = 1;
+    this._galleryPanX = 0;
+    this._galleryPanY = 0;
+    this._applyGalleryTransform();
+
+    imgEl.src = img.url;
+    imgEl.alt = img.label || img.model || "Generated Image";
+
+    // Show metadata
+    const model = img.model || "Unknown model";
+    const prompt = img.prompt || "";
+    const snippet = prompt.length > 200 ? prompt.slice(0, 200) + "…" : prompt;
+    metaEl.innerHTML = `
+      <span class="gallery-meta-model">${escapeHtml(model)}</span>
+      ${snippet ? `<span class="gallery-meta-prompt" title="${escapeHtml(prompt)}">${escapeHtml(snippet)}</span>` : ""}
+    `;
+
+    this._updateGalleryCounter();
+    this._updateGalleryNavButtons();
+  },
+
+  _applyGalleryTransform() {
+    const container = document.getElementById("gallery-image-container");
+    if (!container) return;
+    const img = container.querySelector("img");
+    if (!img) return;
+    img.style.transform = `scale(${this._galleryScale}) translate(${this._galleryPanX / this._galleryScale}px, ${this._galleryPanY / this._galleryScale}px)`;
+    img.style.cursor = this._galleryScale > 1 ? (this._galleryIsPanning ? "grabbing" : "grab") : "default";
+  },
+
+  _updateGalleryCounter() {
+    const counter = document.getElementById("gallery-counter");
+    if (counter) {
+      counter.textContent = `${this._galleryCurrentIdx + 1}/${this._galleryImages.length}`;
+    }
+  },
+
+  _updateGalleryNavButtons() {
+    const prevBtn = document.getElementById("gallery-prev-btn");
+    const nextBtn = document.getElementById("gallery-next-btn");
+    if (prevBtn) prevBtn.style.display = this._galleryCurrentIdx <= 0 ? "none" : "";
+    if (nextBtn) nextBtn.style.display = this._galleryCurrentIdx >= this._galleryImages.length - 1 ? "none" : "";
+  },
+
+  /* ── Navigation ────────────────────────────────────────────────────────── */
+
+  _galleryPrev() {
+    if (this._galleryCurrentIdx > 0) {
+      this._galleryCurrentIdx--;
+      this._renderGalleryImage();
+    }
+  },
+
+  _galleryNext() {
+    if (this._galleryCurrentIdx < this._galleryImages.length - 1) {
+      this._galleryCurrentIdx++;
+      this._renderGalleryImage();
+    }
+  },
+
+  _galleryZoomIn() {
+    this._galleryScale = Math.min(5, this._galleryScale + 0.25);
+    this._applyGalleryTransform();
+  },
+
+  _galleryZoomOut() {
+    this._galleryScale = Math.max(0.25, this._galleryScale - 0.25);
+    if (this._galleryScale <= 1) {
+      this._galleryPanX = 0;
+      this._galleryPanY = 0;
+    }
+    this._applyGalleryTransform();
+  },
+
+  _galleryDownload() {
+    const img = this._galleryImages[this._galleryCurrentIdx];
+    if (!img || !img.url) return;
+    const a = document.createElement("a");
+    a.href = img.url;
+    a.download = `card-studio-image-${Date.now()}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    this.showNotification("Image download started", "info");
+  },
+
+  async _galleryUse() {
+    const img = this._galleryImages[this._galleryCurrentIdx];
+    if (!img || !img.url) return;
+
+    if (this._galleryContext === 'galleryPending') {
+      // Index into this._pendingGalleryImages, not a saved card/reference
+      // image — accept this one candidate and let the panel re-render.
+      const idx = this._galleryCurrentIdx;
+      this.closeGallery();
+      if (typeof this.handleGalleryGenerateAcceptOne === "function") {
+        await this.handleGalleryGenerateAcceptOne(idx);
+      }
+      return;
+    }
+
+    if (this._galleryContext === 'playgroundLibrary') {
+      // Same action as the tile's "New character" button — the row, not the
+      // token-carrying display URL, is what that flow needs.
+      const row = (this._playgroundLibraryRows || [])[this._galleryCurrentIdx];
+      this.closeGallery();
+      if (row && typeof this.sendPlaygroundImageToNewCharacter === "function") {
+        await this.sendPlaygroundImageToNewCharacter(row);
+      }
+      return;
+    }
+
+    // Mimics selectImageOption but keeps gallery images alive
+    if (this.closeImageOptionsModal) this.closeImageOptionsModal();
+    this.closeGallery();
+
+    if (this._galleryContext === 'reference') {
+      // Reference image path: no card exists yet. Needs a real data: URL
+      // (not blob:/remote) since it gets re-sent to the vision model.
+      let dataUrl = img.url;
+      if (typeof this._urlToDataUrl === "function") {
+        try {
+          dataUrl = await this._urlToDataUrl(img.url);
+        } catch (e) {
+          console.error("Gallery use (reference): failed to convert image to data URL", e);
+        }
+      }
+
+      this.referenceImageDataUrl = dataUrl;
+      if (typeof this.updateReferenceImagePreview === "function") {
+        this.updateReferenceImagePreview(dataUrl);
+      }
+      if (typeof this.updateCropButtonVisibility === "function") this.updateCropButtonVisibility();
+
+      this.showNotification("Reference image updated. Re-describing…", "success");
+
+      if (typeof this.apiHandler?.describeReferenceImage === "function") {
+        try {
+          const descriptionField = document.getElementById("reference-image-description");
+          const hint = descriptionField?.value?.trim() || "";
+          const imageDescription = await this.apiHandler.describeReferenceImage(dataUrl, hint);
+          if (descriptionField) descriptionField.value = imageDescription;
+          this.showNotification("Reference image description updated", "success");
+        } catch (descErr) {
+          console.error("Re-describe after gallery use failed:", descErr);
+          this.showNotification(`Could not re-describe image: ${descErr.message}`, "warning");
+        }
+      }
+      return;
+    }
+
+    if (this.currentImageUrl && this.currentImageUrl.startsWith("blob:") && this.currentImageUrl !== img.url) {
+      URL.revokeObjectURL(this.currentImageUrl);
+    }
+
+    this.currentImageUrl = img.url;
+
+    const imageContainer = document.getElementById("image-content");
+    if (imageContainer && window.imageGenerator) {
+      imageContainer.innerHTML = window.imageGenerator.formatImageForDisplay(img.url);
+    }
+
+    const customPromptTextarea = document.getElementById("custom-image-prompt");
+    if (customPromptTextarea && img.prompt) {
+      customPromptTextarea.value = img.prompt;
+      if (window.updatePromptCharCount) window.updatePromptCharCount();
+    }
+
+    if (img.model) {
+      const activeImageModelSelect = document.getElementById("active-image-model");
+      if (activeImageModelSelect) {
+        activeImageModelSelect.value = img.model;
+        this.config.set("api.image.model", img.model);
+      }
+    }
+
+    this.showNotification("Image applied to card!", "success");
+    this.saveCardToLibrary().catch(() => {});
+    this.refreshLibraryViews().catch(() => {});
+  },
+
+  // Only reachable when context is 'galleryPending' — the button itself is
+  // hidden otherwise (see openGallery()).
+  _galleryDiscardPending() {
+    if (this._galleryContext !== 'galleryPending') return;
+    const idx = this._galleryCurrentIdx;
+    this.closeGallery();
+    if (typeof this.handleGalleryGenerateDiscardOne === "function") {
+      this.handleGalleryGenerateDiscardOne(idx);
+    }
+  },
+
+  /* ── Events ────────────────────────────────────────────────────────────── */
+
+  _bindGalleryEvents() {
+    this._onGalleryKey = (e) => {
+      switch (e.key) {
+        case "Escape": this.closeGallery(); break;
+        case "ArrowLeft": this._galleryPrev(); break;
+        case "ArrowRight": this._galleryNext(); break;
+        case "+":
+        case "=": this._galleryZoomIn(); break;
+        case "-": this._galleryZoomOut(); break;
+      }
+    };
+    document.addEventListener("keydown", this._onGalleryKey);
+
+    const container = document.getElementById("gallery-image-container");
+    if (!container) return;
+
+    // Mouse wheel zoom
+    this._onGalleryWheel = (e) => {
+      e.preventDefault();
+      if (e.deltaY < 0) this._galleryZoomIn();
+      else this._galleryZoomOut();
+    };
+    container.addEventListener("wheel", this._onGalleryWheel, { passive: false });
+
+    // Pan start
+    this._onGalleryMouseDown = (e) => {
+      if (this._galleryScale <= 1) return;
+      e.preventDefault();
+      this._galleryIsPanning = true;
+      this._galleryPanStartX = e.clientX;
+      this._galleryPanStartY = e.clientY;
+      this._galleryPanOrigX = this._galleryPanX;
+      this._galleryPanOrigY = this._galleryPanY;
+      this._applyGalleryTransform();
+    };
+    container.addEventListener("mousedown", this._onGalleryMouseDown);
+
+    // Pan move
+    this._onGalleryMouseMove = (e) => {
+      if (!this._galleryIsPanning) return;
+      this._galleryPanX = this._galleryPanOrigX + (e.clientX - this._galleryPanStartX);
+      this._galleryPanY = this._galleryPanOrigY + (e.clientY - this._galleryPanStartY);
+      this._applyGalleryTransform();
+    };
+    window.addEventListener("mousemove", this._onGalleryMouseMove);
+
+    // Pan end
+    this._onGalleryMouseUp = () => {
+      this._galleryIsPanning = false;
+      this._applyGalleryTransform();
+    };
+    window.addEventListener("mouseup", this._onGalleryMouseUp);
+
+    // Touch support — pinch to zoom & two-finger pan
+    let lastTouchDist = 0;
+    let lastTouchScale = 1;
+    this._onGalleryTouchStart = (e) => {
+      if (e.touches.length === 2) {
+        lastTouchDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY,
+        );
+        lastTouchScale = this._galleryScale;
+      } else if (e.touches.length === 1 && this._galleryScale > 1) {
+        this._galleryIsPanning = true;
+        this._galleryPanStartX = e.touches[0].clientX;
+        this._galleryPanStartY = e.touches[0].clientY;
+        this._galleryPanOrigX = this._galleryPanX;
+        this._galleryPanOrigY = this._galleryPanY;
+      }
+    };
+    container.addEventListener("touchstart", this._onGalleryTouchStart, { passive: false });
+
+    this._onGalleryTouchMove = (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY,
+        );
+        if (lastTouchDist > 0) {
+          const newScale = Math.min(5, Math.max(0.25, lastTouchScale * (dist / lastTouchDist)));
+          this._galleryScale = newScale;
+          if (newScale <= 1) { this._galleryPanX = 0; this._galleryPanY = 0; }
+          this._applyGalleryTransform();
+        }
+      } else if (e.touches.length === 1 && this._galleryIsPanning) {
+        this._galleryPanX = this._galleryPanOrigX + (e.touches[0].clientX - this._galleryPanStartX);
+        this._galleryPanY = this._galleryPanOrigY + (e.touches[0].clientY - this._galleryPanStartY);
+        this._applyGalleryTransform();
+      }
+    };
+    container.addEventListener("touchmove", this._onGalleryTouchMove, { passive: false });
+
+    this._onGalleryTouchEnd = () => {
+      this._galleryIsPanning = false;
+      lastTouchDist = 0;
+    };
+    window.addEventListener("touchend", this._onGalleryTouchEnd);
+
+    // Click on overlay backdrop to close
+    this._onGalleryOverlayClick = (e) => {
+      if (e.target === document.getElementById("gallery-lightbox")) {
+        this.closeGallery();
+      }
+    };
+    document.getElementById("gallery-lightbox")?.addEventListener("click", this._onGalleryOverlayClick);
+
+    // Button bindings — bound once ever, not per-open. These handlers read
+    // current state (this._galleryImages/_galleryCurrentIdx) at click-time
+    // rather than capturing anything from this particular open(), so they
+    // never needed rebinding on reopen. They used to be re-added on every
+    // openGallery() call with no matching removal in _unbindGalleryEvents(),
+    // so after opening the lightbox N times in a session, Prev/Next (and
+    // every other button here) fired N times per click — silently skipping
+    // over images and making some of them unreachable.
+    if (!this._galleryStaticButtonsBound) {
+      this._galleryStaticButtonsBound = true;
+      const btnBind = (id, handler) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("click", handler);
+      };
+      btnBind("gallery-close-btn", () => this.closeGallery());
+      btnBind("gallery-prev-btn", () => this._galleryPrev());
+      btnBind("gallery-next-btn", () => this._galleryNext());
+      btnBind("gallery-zoom-in-btn", () => this._galleryZoomIn());
+      btnBind("gallery-zoom-out-btn", () => this._galleryZoomOut());
+      btnBind("gallery-download-btn", () => this._galleryDownload());
+      btnBind("gallery-use-btn", () => this._galleryUse());
+      btnBind("gallery-lightbox-discard-btn", () => this._galleryDiscardPending());
+    }
+  },
+
+  _unbindGalleryEvents() {
+    if (this._onGalleryKey) document.removeEventListener("keydown", this._onGalleryKey);
+    if (this._onGalleryWheel) document.getElementById("gallery-image-container")?.removeEventListener("wheel", this._onGalleryWheel);
+    if (this._onGalleryMouseDown) document.getElementById("gallery-image-container")?.removeEventListener("mousedown", this._onGalleryMouseDown);
+    if (this._onGalleryMouseMove) window.removeEventListener("mousemove", this._onGalleryMouseMove);
+    if (this._onGalleryMouseUp) window.removeEventListener("mouseup", this._onGalleryMouseUp);
+    if (this._onGalleryTouchStart) document.getElementById("gallery-image-container")?.removeEventListener("touchstart", this._onGalleryTouchStart);
+    if (this._onGalleryTouchMove) document.getElementById("gallery-image-container")?.removeEventListener("touchmove", this._onGalleryTouchMove);
+    if (this._onGalleryTouchEnd) window.removeEventListener("touchend", this._onGalleryTouchEnd);
+    if (this._onGalleryOverlayClick) document.getElementById("gallery-lightbox")?.removeEventListener("click", this._onGalleryOverlayClick);
+  },
+
+  /* ── Character image gallery (persisted, linked to a saved card) ─────────── */
+
+
+  /* ── Helper: make an image list openable in the gallery ────────────────── */
+  // Call this from image-handler to attach gallery triggers to image cards.
+  // context is forwarded to openGallery() — see its comment for why ('card'
+  // vs 'reference' changes what the gallery's own "Use This" button does).
+  _makeImageGalleryable(gridContainer, images, context = 'card') {
+    if (!gridContainer || !images || images.length === 0) return;
+
+    const cards = gridContainer.querySelectorAll("[data-gallery-image]");
+    // Already tagged — skip
+    if (cards.length > 0) return;
+
+    // Find all direct child image wrappers (divs containing <img>)
+    const wrappers = gridContainer.querySelectorAll(":scope > div");
+    let imageIndex = 0; // separate counter so skipped wrappers don't shift indexes
+    wrappers.forEach((wrapper) => {
+      // Skip the "CURRENT" keep-card — it is not in the images[] array
+      if (wrapper.querySelector('[style*="CURRENT"]')) return;
+
+      if (imageIndex >= images.length) return;
+
+      // Already has gallery trigger?
+      if (wrapper.dataset.galleryImage === "true") return;
+      wrapper.dataset.galleryImage = "true";
+
+      const capturedIndex = imageIndex;
+      imageIndex++;
+
+      // Add magnifying glass overlay
+      const zoomBtn = document.createElement("button");
+      zoomBtn.className = "gallery-zoom-trigger";
+      zoomBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>';
+      zoomBtn.setAttribute("aria-label", "View in gallery");
+      zoomBtn.title = "View in gallery";
+      zoomBtn.style.cssText =
+        "position:absolute;top:0.5rem;right:0.5rem;z-index:2;background:rgba(0,0,0,0.55);color:#fff;border:none;border-radius:50%;width:2rem;height:2rem;font-size:0.9rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform 0.15s,background 0.15s;";
+      zoomBtn.addEventListener("mouseenter", () => { zoomBtn.style.transform = "scale(1.15)"; zoomBtn.style.background = "var(--accent)"; });
+      zoomBtn.addEventListener("mouseleave", () => { zoomBtn.style.transform = "scale(1)"; zoomBtn.style.background = "rgba(0,0,0,0.55)"; });
+      zoomBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.openGallery(images, capturedIndex, context);
+      });
+      wrapper.appendChild(zoomBtn);
+    });
+  },
+
+});

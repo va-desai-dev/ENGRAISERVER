@@ -240,7 +240,8 @@ def completion_request(payload: Mapping[str, Any], prompt: str) -> dict[str, Any
             if isinstance(schema, Mapping):
                 body["json_schema"] = schema
         elif response_format.get("type") == "json_object":
-            body["json_schema"] = {"type": "object"}
+            schema = response_format.get("schema")
+            body["json_schema"] = schema if isinstance(schema, Mapping) else {"type": "object"}
     body.update(prompt=prompt, stream=bool(payload.get("stream")), cache_prompt=True)
     return body
 

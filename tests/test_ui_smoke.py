@@ -333,7 +333,10 @@ def test_sheets_stay_within_viewport_with_long_content(page: Page, kind: str):
 
 def open_new_profile(page: Page) -> None:
     sign_in(page)
-    page.get_by_role("button", name="New route").click()
+    text_models = page.locator("section.routes").filter(
+        has=page.get_by_role("heading", name="Text Models", exact=True)
+    )
+    text_models.get_by_role("button", name="New Profile", exact=True).click()
     page.wait_for_selector('[data-testid="model-select"] option', state="attached", timeout=15000)
 
 

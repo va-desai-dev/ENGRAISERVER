@@ -6,6 +6,27 @@ import type { Metrics, Profile, Snapshot } from "../lib/types";
    which is the promise the lock screen makes. */
 const TOKEN_KEY = "engrai.session";
 
+/* Set by an app served beside the console (Card Studio, /cardgen/) when it
+   found no session and sent the visitor here to sign in. */
+const RETURN_KEY = "engrai.return";
+const RETURN_PATHS = ["/cardgen/"];
+
+/** Navigate back to the app that asked for a sign-in, if one did. */
+function resumeReturn(): boolean {
+  let target: string | null = null;
+  try {
+    target = sessionStorage.getItem(RETURN_KEY);
+    sessionStorage.removeItem(RETURN_KEY);
+  } catch {
+    return false;
+  }
+  // Only known same-origin apps: an arbitrary value here would be an open
+  // redirect reachable by anything that can write this tab's storage.
+  if (!target || !RETURN_PATHS.some((path) => target!.startsWith(path))) return false;
+  window.location.replace(target);
+  return true;
+}
+
 export type Screen = "loading" | "setup" | "locked" | "ready";
 
 export interface LogEntry {
@@ -91,6 +112,7 @@ export const useStore = create<Store>((set, get) => ({
     if (token) {
       try {
         get().applySnapshot(await api.state());
+        if (resumeReturn()) return;
         set({ screen: "ready" });
         get().note("Session resumed", "good");
         return;
@@ -116,6 +138,7 @@ export const useStore = create<Store>((set, get) => ({
     const session = await api.signIn(password);
     get().adoptToken(session.token);
     get().applySnapshot(await api.state());
+    if (resumeReturn()) return;
     set({ screen: "ready" });
     get().note("Control plane unlocked", "good");
   },

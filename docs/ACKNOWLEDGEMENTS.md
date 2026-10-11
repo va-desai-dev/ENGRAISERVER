@@ -34,6 +34,11 @@ Where a library keeps its license inside a header (or not in the vendored tree
 at all), the notice is kept verbatim in `runtime/notices/<engine>/`, and the
 build refuses to run if the pinned source no longer matches it.
 
+Card Studio (`src/engrai_server/cardgen/`) is adapted from CardGen V2,
+copyright (c) 2025 Tremontaine, MIT licensed. Its license text ships beside
+the app as `src/engrai_server/cardgen/web/LICENSE`. ENGRAI replaced its Node
+server, accounts and provider integrations with the gateway's own.
+
 The gateway's Python dependencies, including
 [Jinja](https://github.com/pallets/jinja) (BSD-3-Clause) for chat template
 rendering, are installed from PyPI under their own licenses.

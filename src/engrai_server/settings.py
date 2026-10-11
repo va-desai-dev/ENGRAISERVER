@@ -181,6 +181,12 @@ class Settings(BaseSettings):
         default_factory=lambda: _state_path("image-worker.log"),
         validation_alias=AliasChoices("ENGRAI_IMAGE_ENGINE_LOG", "IMAGE_ENGINE_LOG"),
     )
+    # Card Studio's library: cards, prompts, galleries and its own preferences.
+    # User-authored content, so it lives under XDG data and belongs in backups.
+    cardgen_data_dir: Path = Field(
+        default_factory=lambda: _data_path("cardgen"),
+        validation_alias=AliasChoices("ENGRAI_CARDGEN_DATA_DIR", "CARDGEN_DATA_DIR"),
+    )
     image_state_path: Path = Field(default_factory=lambda: _state_path("image-runtime.json"))
     image_result_dir: Path = Field(default_factory=lambda: _state_path("image-results"))
     image_result_ttl_seconds: int = Field(

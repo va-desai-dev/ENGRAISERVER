@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import secrets
-from collections.abc import Iterable
-
 from fastapi import Header, HTTPException, status
 
 from .credentials import CredentialStore
@@ -15,12 +12,6 @@ def extract_bearer(authorization: str | None) -> str:
     if separator and scheme.lower() == "bearer":
         return token.strip()
     return ""
-
-
-def token_matches(candidate: str, allowed: Iterable[str]) -> bool:
-    return bool(candidate) and any(
-        secrets.compare_digest(candidate, expected) for expected in allowed
-    )
 
 
 def build_dependencies(store: CredentialStore):

@@ -1,0 +1,709 @@
+// Library / Storage Methods — extends CharacterGeneratorApp prototype
+Object.assign(CharacterGeneratorApp.prototype, {
+
+  formatLibraryTime(isoString) {
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return "Unknown time";
+    return date.toLocaleString();
+  },
+
+  async savePromptToLibrary(promptData) {
+    if (!this.storageReady || !this.storage) return false;
+    try {
+      const normalized = this.preparePromptRecordForStorage(promptData);
+      const fingerprint = [
+        normalized.concept || "",
+        normalized.characterName || "",
+        normalized.pov || "",
+        normalized.referenceImageDescription || "",
+      ].join("::");
+
+      const existingPrompts = await this.storage.listPrompts();
+      const existing = existingPrompts.find(
+        (entry) => entry.fingerprint === fingerprint,
+      );
+
+      const { _trimmedFields, ...promptRecord } = normalized;
+      const fullRecord = { ...promptRecord, fingerprint };
+      if (Number.isInteger(existing?.id) && existing.id > 0) {
+        fullRecord.id = existing.id;
+      }
+      await this.storage.savePrompt(fullRecord);
+
+      if (_trimmedFields?.length) {
+        this.showNotification(
+          `Prompt saved. Omitted large ${_trimmedFields.join(" and ")} snapshot for storage safety.`,
+          "warning",
+        );
+      }
+      return true;
+    } catch (error) {
+      console.error("Failed to save prompt (full record):", error);
+
+      try {
+        const minimal = this.preparePromptRecordForStorage(promptData, {
+          minimal: true,
+        });
+        const fingerprint = [
+          minimal.concept || "",
+          minimal.characterName || "",
+          minimal.pov || "",
+          minimal.referenceImageDescription || "",
+        ].join("::");
+
+        const existingPrompts = await this.storage.listPrompts();
+        const existing = existingPrompts.find(
+          (entry) => entry.fingerprint === fingerprint,
+        );
+
+        const { _trimmedFields, ...minimalRecord } = minimal;
+        const retryRecord = { ...minimalRecord, fingerprint };
+        if (Number.isInteger(existing?.id) && existing.id > 0) {
+          retryRecord.id = existing.id;
+        }
+        await this.storage.savePrompt(retryRecord);
+
+        this.showNotification(
+          "Prompt saved in compact mode (large context omitted).",
+          "warning",
+        );
+        return true;
+      } catch (retryError) {
+        console.error("Failed to save prompt (compact retry):", retryError);
+        this.updateLibraryStatus(
+          "Failed to save prompt. Check browser storage permissions.",
+        );
+        return false;
+      }
+    }
+  },
+
+  preparePromptRecordForStorage(promptData, options = {}) {
+    const minimal = Boolean(options.minimal);
+    const maxEmbeddedChars = 400000;
+
+    const safe = {
+      concept: promptData?.concept || "",
+      characterName: promptData?.characterName || "",
+      pov: promptData?.pov || "third",
+      cardType: promptData?.cardType || "single",
+      referenceImageDescription: promptData?.referenceImageDescription || "",
+      referenceImageDataUrl: "",
+      lorebookData: null,
+      _trimmedFields: [],
+    };
+
+    if (minimal) {
+      return safe;
+    }
+
+    const referenceImageDataUrl = promptData?.referenceImageDataUrl || "";
+    if (referenceImageDataUrl) {
+      if (referenceImageDataUrl.length <= maxEmbeddedChars) {
+        safe.referenceImageDataUrl = referenceImageDataUrl;
+      } else {
+        safe._trimmedFields.push("reference-image");
+      }
+    }
+
+    if (promptData?.lorebookData) {
+      try {
+        const lorebookJson = JSON.stringify(promptData.lorebookData);
+        if (lorebookJson.length <= maxEmbeddedChars) {
+          safe.lorebookData = JSON.parse(lorebookJson);
+        } else {
+          safe._trimmedFields.push("lorebook");
+        }
+      } catch (error) {
+        safe._trimmedFields.push("lorebook");
+      }
+    }
+
+    return safe;
+  },
+
+  async saveCardToLibrary(isPermanent = false, specificId = null) {
+    if (!this.storageReady || !this.storage || !this.currentCharacter) throw new Error("Local library is unavailable; card was not saved.");
+
+    try {
+      this.currentCharacter.character_book = this.buildCharacterBook();
+      this.syncAltGreetingsToCharacter();
+
+      let imageBlob = null;
+      if (this.currentImageUrl) {
+        try {
+          if (this.currentImageUrl.startsWith("blob:")) {
+            const res = await fetch(this.currentImageUrl);
+            imageBlob = await res.blob();
+          } else if (this.imageGenerator && typeof this.imageGenerator.convertToBlob === "function") {
+            imageBlob = await this.imageGenerator.convertToBlob(this.currentImageUrl);
+          }
+        } catch (error) {
+          console.warn("Skipping image blob save:", error.message);
+        }
+      }
+
+      let imageHistoryData = [];
+      if (this.imageHistoryUrls && this.imageHistoryUrls.length > 0) {
+        for (const url of this.imageHistoryUrls) {
+          try {
+            if (typeof url === 'string' && url.startsWith("data:")) {
+              imageHistoryData.push(url);
+              continue;
+            }
+            let b;
+            if (url.startsWith("blob:")) {
+              const res = await fetch(url);
+              b = await res.blob();
+            } else if (this.imageGenerator && typeof this.imageGenerator.convertToBlob === "function") {
+              b = await this.imageGenerator.convertToBlob(url);
+            }
+            if (b) {
+              const base64 = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(b);
+              });
+              imageHistoryData.push(base64);
+            }
+          } catch (err) {
+            console.warn("Skipping history blob save:", err.message);
+          }
+        }
+      }
+
+      const cardData = {
+        characterName: this.currentCharacter.name || "Unnamed Character",
+        character: JSON.parse(JSON.stringify(this.currentCharacter)),
+        imageBlob,
+        imageHistory: imageHistoryData,
+        isPermanent,
+        stSourceAvatar: this.stSourceAvatar || null,
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (specificId) {
+        cardData.id = specificId;
+        const cards = await this.storage.listCards();
+        const existing = cards.find((c) => c.id === specificId);
+        if (existing && existing.createdAt) {
+          cardData.createdAt = existing.createdAt;
+        } else {
+          cardData.createdAt = new Date().toISOString();
+        }
+      } else {
+        cardData.createdAt = new Date().toISOString();
+      }
+
+      const savedCard = await this.storage.saveCard(cardData);
+      if (isPermanent && savedCard && savedCard.id) {
+        this.currentCardId = savedCard.id;
+        if (typeof this._renderCharacterGalleryPanel === "function") this._renderCharacterGalleryPanel();
+      }
+
+      if (!isPermanent) {
+        const allCards = await this.storage.listCards();
+        const tempCards = allCards.filter((c) => !c.isPermanent);
+        if (tempCards.length > 30) {
+          tempCards.sort(
+            (a, b) => new Date(a.updatedAt || a.createdAt || 0).getTime() - new Date(b.updatedAt || b.createdAt || 0).getTime(),
+          );
+          const toDelete = tempCards.slice(0, tempCards.length - 30);
+          for (const card of toDelete) {
+            await this.storage.deleteCard(card.id);
+          }
+        }
+      }
+      return savedCard;
+    } catch (error) {
+      console.error("Failed to save card:", error);
+      if (isPermanent) throw error;
+      this.showNotification(`History was not saved: ${error.message}`, "warning");
+      return null;
+    }
+  },
+
+  async handleSnapshotToHistory() {
+    if (!this.currentCharacter) {
+      this.showNotification("No character to snapshot", "warning");
+      return;
+    }
+    const btn = document.getElementById("snapshot-history-btn");
+    if (btn) btn.disabled = true;
+    try {
+      if (!await this.saveCardToLibrary(false)) return;
+      await this.refreshLibraryViews();
+      this.showNotification("Snapshot saved to history!", "success");
+    } catch (error) {
+      this.showNotification(`Snapshot failed: ${error.message}`, "error");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  },
+
+
+  /**
+   * Show the rich overwrite-confirmation modal and return a promise that
+   * resolves to 'overwrite' | 'savenew' | 'cancel'.
+   */
+  _showOverwriteConfirmModal(existingCard, charName) {
+    return new Promise((resolve) => {
+      const modal      = document.getElementById("overwrite-confirm-modal");
+      const msg        = document.getElementById("overwrite-confirm-msg");
+      const existImg   = document.getElementById("overwrite-existing-img");
+      const existPh    = document.getElementById("overwrite-existing-placeholder");
+      const existName  = document.getElementById("overwrite-existing-name");
+      const newImg     = document.getElementById("overwrite-new-img");
+      const newPh      = document.getElementById("overwrite-new-placeholder");
+      const newName    = document.getElementById("overwrite-new-name");
+      const btnOver    = document.getElementById("overwrite-confirm-overwrite-btn");
+      const btnNew     = document.getElementById("overwrite-confirm-savenew-btn");
+      const btnCancel  = document.getElementById("overwrite-confirm-cancel-btn");
+
+      if (!modal) {
+        // Fallback to native confirm if modal missing (shouldn't happen)
+        const r = confirm(`A character named "${charName}" already exists.\n\nOverwrite it?`);
+        resolve(r ? "overwrite" : "cancel");
+        return;
+      }
+
+      // Populate message
+      msg.textContent = `A character named "${charName}" already exists in your saved library. Please review both cards carefully before deciding.`;
+
+      // Reset image panels
+      existImg.style.display  = "none";
+      existPh.style.display   = "block";
+      newImg.style.display    = "none";
+      newPh.style.display     = "block";
+
+      // Existing card image via thumbnail endpoint
+      existName.textContent = existingCard.characterName || charName;
+      if (existingCard.id) {
+        const thumbUrl = `/cardgen/api/storage/cards/thumbnail?cardId=${encodeURIComponent(existingCard.id)}`;
+        const tmpImg = new Image();
+        tmpImg.onload = () => {
+          existImg.src = thumbUrl;
+          existImg.style.display = "block";
+          existPh.style.display  = "none";
+        };
+        tmpImg.onerror = () => { /* leave placeholder visible */ };
+        tmpImg.src = thumbUrl;
+      }
+
+      // New card image from current session
+      newName.textContent = charName;
+      if (this.currentImageUrl) {
+        newImg.src = this.currentImageUrl;
+        newImg.style.display = "block";
+        newPh.style.display  = "none";
+      }
+
+      // Show modal
+      modal.classList.add("show");
+      modal.style.display = "flex";
+
+      const cleanup = (result) => {
+        modal.classList.remove("show");
+        modal.style.display = "";
+        btnOver.removeEventListener("click", onOver);
+        btnNew.removeEventListener("click", onNew);
+        btnCancel.removeEventListener("click", onCancel);
+        resolve(result);
+      };
+
+      const onOver   = () => cleanup("overwrite");
+      const onNew    = () => cleanup("savenew");
+      const onCancel = () => cleanup("cancel");
+
+      btnOver.addEventListener("click", onOver);
+      btnNew.addEventListener("click", onNew);
+      btnCancel.addEventListener("click", onCancel);
+    });
+  },
+
+  async handleSaveCardManual() {
+    try {
+      this.syncCardEditor();
+      if (!this.storageReady || !this.storage) throw new Error("Local library is unavailable");
+      const cards = await this.storage.listCards();
+      const existing = cards.find(c => c.isPermanent && c.characterName === this.currentCharacter.name);
+      let saveId = null;
+      if (existing) {
+        const choice = await this._showOverwriteConfirmModal(existing, this.currentCharacter.name);
+        if (choice === 'cancel') return;
+        if (choice === 'overwrite') saveId = existing.id;
+      }
+      await this.saveCardToLibrary(true, saveId);
+      await this.refreshLibraryViews();
+      this.showNotification("Card saved to local library.", "success");
+    } catch (error) { this.showNotification(`Card was not saved: ${error.message}`, "error"); }
+  },
+
+  async refreshLibraryViews() {
+    if (!this.storageReady || !this.storage) {
+      this.renderStorageUnavailableState();
+      return;
+    }
+
+    try {
+      const [prompts, cards] = await Promise.all([
+        this.storage.listPrompts(),
+        this.storage.listCards(),
+      ]);
+
+      prompts.sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return timeB - timeA;
+      });
+      cards.sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return timeB - timeA;
+      });
+
+      const promptList = document.getElementById("stored-prompts-list");
+      const cardList = document.getElementById("stored-cards-list");
+      const historyList = document.getElementById("history-cards-list");
+
+      if (promptList) {
+        if (!prompts.length) {
+          promptList.innerHTML =
+            '<p class="library-empty">No saved prompts yet.</p>';
+        } else {
+          promptList.innerHTML = prompts
+            .map((prompt) => {
+              const promptPreview = prompt.concept
+                ? `"${escapeHtml(prompt.concept.substring(0, 30).replace(/\n/g, " "))}${prompt.concept.length > 30 ? "..." : ""}"`
+                : "(No concept)";
+              const titleName = escapeHtml(prompt.characterName || promptPreview);
+              return `
+                <div class="library-item">
+                  <div class="library-item-title">${titleName} - ${escapeHtml(prompt.pov || "third")} POV</div>
+                  <div class="library-item-date">${this.formatLibraryTime(prompt.updatedAt)}</div>
+                  <div class="library-item-actions">
+                    <button class="btn-small" data-action="load-prompt" data-id="${prompt.id}">Load</button>
+                    <button class="btn-small" data-action="delete-prompt" data-id="${prompt.id}">Delete</button>
+                  </div>
+                </div>
+              `;
+            })
+            .join("");
+        }
+      }
+
+      const permanentCards = cards.filter((c) => c.isPermanent);
+      const tempCards = cards.filter((c) => !c.isPermanent);
+
+
+      if (cardList) {
+        if (!permanentCards.length) {
+          cardList.innerHTML =
+            '<p class="library-empty">No permanent cards yet.</p>';
+        } else {
+          cardList.innerHTML = permanentCards
+            .map((card) => {
+              const tStamp = new Date(card.updatedAt || card.createdAt || 0).getTime();
+              const thumbUrl = `/cardgen/api/storage/cards/thumbnail?cardId=${encodeURIComponent(card.id)}&_t=${tStamp}`;
+              return `
+                <div class="library-item st-card">
+                  <div class="st-card-thumb-wrap">
+                    <img class="st-card-thumb" src="${thumbUrl}" alt="" loading="lazy" onerror="this.style.display='none'">
+                    <div class="st-card-thumb-placeholder"></div>
+                  </div>
+                  <div class="st-card-body">
+                    <div class="library-item-title">${escapeHtml(card.characterName || "Unnamed Character")}</div>
+                    <div class="library-item-date">${this.formatLibraryTime(card.updatedAt)}</div>
+                    <div class="library-item-actions">
+                      <button class="btn-small" data-action="load-card" data-id="${card.id}">Load</button>
+                      <button class="btn-small" data-action="delete-card" data-id="${card.id}">Delete</button>
+                    </div>
+                  </div>
+                </div>
+              `;
+            })
+            .join("");
+        }
+      }
+
+      if (historyList) {
+        if (!tempCards.length) {
+          historyList.innerHTML =
+            '<p class="library-empty">No history available.</p>';
+        } else {
+          historyList.innerHTML = tempCards
+            .map((card) => {
+              const tStamp = new Date(card.updatedAt || card.createdAt || 0).getTime();
+              const thumbUrl = `/cardgen/api/storage/cards/thumbnail?cardId=${encodeURIComponent(card.id)}&_t=${tStamp}`;
+              return `
+                <div class="library-item st-card">
+                  <div class="st-card-thumb-wrap">
+                    <img class="st-card-thumb" src="${thumbUrl}" alt="" loading="lazy" onerror="this.style.display='none'">
+                    <div class="st-card-thumb-placeholder"></div>
+                  </div>
+                  <div class="st-card-body">
+                    <div class="library-item-title">${escapeHtml(card.characterName || "Unnamed Character")}</div>
+                    <div class="library-item-date">${this.formatLibraryTime(card.updatedAt)}</div>
+                    <div class="library-item-actions">
+                      <button class="btn-small" data-action="load-card" data-id="${card.id}">Load</button>
+                      <button class="btn-small" data-action="delete-card" data-id="${card.id}">Delete</button>
+                    </div>
+                  </div>
+                </div>
+              `;
+            })
+            .join("");
+        }
+      }
+
+      this.updateLibraryStatus(
+        `Saved ${prompts.length} prompt(s), ${permanentCards.length} permanent card(s), and ${tempCards.length} history item(s).`,
+      );
+    } catch (error) {
+      console.error("Failed to refresh IndexedDB library view:", error);
+      this.updateLibraryStatus("Failed to load local library.");
+    }
+  },
+
+  renderStorageUnavailableState() {
+    const message =
+      '<p class="library-empty">Local storage is unavailable in this browser/session.</p>';
+    ["stored-prompts-list", "stored-cards-list", "history-cards-list"].forEach(
+      (id) => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = message;
+      },
+    );
+  },
+
+  updateLibraryStatus(text) {
+    const status = document.getElementById("library-status");
+    if (status) {
+      status.textContent = text;
+    }
+  },
+
+  async handleLibraryPromptClick(event) {
+    const actionElement = event.target.closest("[data-action]");
+    if (!actionElement) return;
+
+    const action = actionElement.dataset.action;
+    const id = Number(actionElement.dataset.id);
+
+    try {
+      if (action === "load-prompt") {
+        const prompt = await this.storage.getPrompt(id);
+        if (!prompt) return;
+        document.getElementById("character-concept").value =
+          prompt.concept || "";
+        document.getElementById("character-name").value =
+          prompt.characterName || "";
+        document.getElementById("pov-select").value = prompt.pov || "third";
+        const cardTypeSelect = document.getElementById("card-type-select");
+        if (cardTypeSelect) {
+          cardTypeSelect.value = prompt.cardType || "single";
+          cardTypeSelect.dispatchEvent(new Event("change"));
+        }
+        const refDescription = document.getElementById(
+          "reference-image-description",
+        );
+        if (refDescription) {
+          refDescription.value = prompt.referenceImageDescription || "";
+        }
+        if (prompt.referenceImageDataUrl) {
+          this.referenceImageDataUrl = prompt.referenceImageDataUrl;
+          this.updateReferenceImagePreview(prompt.referenceImageDataUrl);
+        }
+        this.lorebookData = prompt.lorebookData || null;
+        this.showNotification("Prompt loaded", "success");
+      } else if (action === "delete-prompt") {
+        await this.storage.deletePrompt(id);
+        await this.refreshLibraryViews();
+        this.showNotification("Prompt deleted", "info");
+      }
+    } catch (error) {
+      console.error("Prompt library action failed:", error);
+      this.showNotification("Prompt action failed", "error");
+    }
+  },
+
+  async handleLibraryCardClick(event) {
+    const actionElement = event.target.closest("[data-action]");
+    if (!actionElement) return;
+
+    const action = actionElement.dataset.action;
+    const id = actionElement.dataset.id;
+
+    try {
+      if (action === "load-card") {
+        const card = await this.storage.getCard(id);
+        if (!card?.character) return;
+        // Restore the ST slot link if it was saved, otherwise clear it
+        this.stSourceAvatar = card.stSourceAvatar || null;
+        this.currentCharacter = card.character;
+        this.originalCharacter = JSON.parse(JSON.stringify(card.character));
+        this.displayCharacter();
+        this.showResultSection();
+        const inputSectionDetails = document.getElementById("input-section-details");
+        if (inputSectionDetails) inputSectionDetails.open = false;
+        document.getElementById("image-controls").style.display = "block";
+        document.getElementById("image-buttons-row").style.display = "";
+
+        if (
+          card.character.character_book &&
+          card.character.character_book.entries
+        ) {
+          this.lorebookEntries = card.character.character_book.entries.map(
+            (e) => ({
+              id:
+                e.id ||
+                Date.now().toString() + Math.random().toString().slice(2, 5),
+              keys: e.keys || [],
+              content: e.content || "",
+              enabled: e.enabled !== false,
+            }),
+          );
+        } else {
+          this.lorebookEntries = [];
+        }
+        this.updateLorebookEntryCount();
+
+        if (card.character.alternateGreetings) {
+          this.altGreetings = card.character.alternateGreetings.map(
+            (content, i) => ({
+              id: Date.now().toString() + i,
+              content,
+            }),
+          );
+        } else {
+          this.altGreetings = [];
+        }
+        this.updateAltGreetingsCount();
+
+        // Reset media state before loading card image/history to prevent cross-card leakage
+        if (typeof this._resetCharacterMediaState === "function") {
+          this._resetCharacterMediaState();
+        } else {
+          if (this.currentImageUrl && this.currentImageUrl.startsWith("blob:")) {
+            try { URL.revokeObjectURL(this.currentImageUrl); } catch (_) {}
+          }
+          this.currentImageUrl = null;
+          if (this.imageHistoryUrls) {
+            this.imageHistoryUrls.forEach(url => {
+              if (url && typeof url === "string" && url.startsWith("blob:")) {
+                try { URL.revokeObjectURL(url); } catch (_) {}
+              }
+            });
+          }
+          this.imageHistoryUrls = [];
+        }
+        this.currentCardId = id;
+
+        if (card.imageBlob instanceof Blob) {
+          this.currentImageUrl = URL.createObjectURL(card.imageBlob);
+          const imageContainer = document.getElementById("image-content");
+          if (imageContainer) {
+            imageContainer.innerHTML = `
+              <div class="image-container">
+                <img src="${this.currentImageUrl}" alt="${card.character.name || "Character"}" class="generated-image">
+              </div>
+            `;
+          }
+        } else {
+          const imageContainer = document.getElementById("image-content");
+          if (imageContainer) {
+            imageContainer.innerHTML = `<div class="image-placeholder"><div class="loading-spinner" style="display:none;"></div><p style="color:var(--text-secondary);font-size:0.875rem;">No image</p></div>`;
+          }
+        }
+
+        if (card.imageHistory && Array.isArray(card.imageHistory)) {
+          for (const item of card.imageHistory) {
+            if (item) {
+              try {
+                if (typeof item === 'string' && item.startsWith('data:')) {
+                  this.imageHistoryUrls.push(item);
+                } else {
+                  const blob = item instanceof Blob ? item : new Blob([item]);
+                  this.imageHistoryUrls.push(URL.createObjectURL(blob));
+                }
+              } catch (e) {
+                console.warn("Failed to restore history blob:", e);
+              }
+            }
+          }
+        }
+        if (typeof this.updateImageHistoryButton === "function") this.updateImageHistoryButton();
+        if (typeof this._renderCharacterGalleryPanel === "function") this._renderCharacterGalleryPanel();
+
+        this.showNotification("Card loaded", "success");
+      } else if (action === "delete-card") {
+        await this.storage.deleteCard(id);
+        await this.refreshLibraryViews();
+        this.showNotification("Card deleted", "info");
+      }
+    } catch (error) {
+      console.error("Card library action failed:", error);
+      this.showNotification("Card action failed", "error");
+    }
+  },
+
+  async handleClearHistory() {
+    if (!this.storageReady || !this.storage) return;
+    if (!confirm("Delete all history snapshots? This cannot be undone. Permanent saves are not affected.")) return;
+    try {
+      const cards = await this.storage.listCards();
+      const tempCards = cards.filter(c => !c.isPermanent);
+      await Promise.all(tempCards.map(c => this.storage.deleteCard(c.id)));
+      await this.refreshLibraryViews();
+      this.showNotification(`Cleared ${tempCards.length} history item(s)`, "info");
+    } catch (error) {
+      console.error("Clear history failed:", error);
+      this.showNotification("Failed to clear history", "error");
+    }
+  },
+
+  async handleClearPrompts() {
+    if (!this.storageReady || !this.storage) return;
+    if (!confirm("Delete all saved prompts? This cannot be undone.")) return;
+    try {
+      const prompts = await this.storage.listPrompts();
+      await Promise.all(prompts.map(p => this.storage.deletePrompt(p.id)));
+      await this.refreshLibraryViews();
+      this.showNotification(`Cleared ${prompts.length} prompt(s)`, "info");
+    } catch (error) {
+      console.error("Clear prompts failed:", error);
+      this.showNotification("Failed to clear prompts", "error");
+    }
+  },
+
+  async handleOpenLibraryGallery() {
+    if (!this.storageReady || !this.storage) {
+      this.showNotification("Library storage is unavailable.", "warning");
+      return;
+    }
+    if (!window.cardGallery) {
+      this.showNotification("Gallery module is not loaded.", "error");
+      return;
+    }
+    
+    try {
+      // Fetch only permanent cards directly from your storage DB
+      const allCards = await this.storage.listCards();
+      const permanentCards = allCards.filter(c => c.isPermanent);
+      
+      // Pass the filtered cards to the gallery, and load it upon selection
+      window.cardGallery.open(permanentCards, async (cardId) => {
+        // Reuse the logic from handleLibraryCardClick to cleanly load the card into the editor
+        const targetEl = document.createElement('div');
+        targetEl.dataset.action = 'load-card';
+        targetEl.dataset.id = cardId;
+        const mockEvent = { target: targetEl };
+        await this.handleLibraryCardClick(mockEvent);
+      });
+    } catch (e) {
+      console.error("Failed to open gallery:", e);
+      this.showNotification("Failed to open gallery view.", "error");
+    }
+  },
+
+});

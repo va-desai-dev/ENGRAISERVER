@@ -15,6 +15,11 @@ images.
 Engines run behind ENGRAI-owned typed contracts and stay bound to loopback or
 private IPC. Clients never send engine flags.
 
+**Card Studio** ships with the gateway at `/cardgen/`: character, group and
+scenario card authoring, lorebooks and portraits, written and drawn by the
+models the console has loaded. It signs in with the console session and has
+no provider settings of its own. See [CARD-STUDIO.md](docs/CARD-STUDIO.md).
+
 > **Development status:** direct text (llama.cpp) and image
 > (stable-diffusion.cpp) execution are integrated. Long-context burn-in,
 > cancellation, and crash-recovery qualification remain release gates.
@@ -164,6 +169,7 @@ Engine-native HTTP surfaces are not public interfaces.
 | `src/engrai_server/engines/` | Engine protocol and provider adapters |
 | `src/engrai_server/` | Gateway, CLI, services, authentication, and orchestration |
 | `src/engrai_server/static/` | Compiled presentation layer shipped in the wheel |
+| `src/engrai_server/cardgen/` | Card Studio: its API, library and job buffer; `web/` is its unbuilt browser app |
 | `ui/` | Presentation source only |
 | `tests/` | Domain, lifecycle, API, packaging, and UI tests |
 
@@ -188,6 +194,7 @@ Mutable data never belongs in the checkout or installed Python package.
 | --- | --- |
 | Configuration and deployments | `${XDG_CONFIG_HOME:-~/.config}/engrai-server/` |
 | Versioned ENGRAI runtime bundles and resolved artifacts | `${XDG_DATA_HOME:-~/.local/share}/engrai-server/` |
+| Card Studio library (cards, prompts, galleries) | `${XDG_DATA_HOME:-~/.local/share}/engrai-server/cardgen/` |
 | Credentials, logs, and process state | `${XDG_STATE_HOME:-~/.local/state}/engrai-server/` |
 | Disposable cache | `${XDG_CACHE_HOME:-~/.cache}/engrai-server/` |
 | Hugging Face model cache | `${HF_HUB_CACHE:-${HF_HOME:-~/.cache/huggingface}/hub}` |

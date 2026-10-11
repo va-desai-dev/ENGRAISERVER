@@ -1,0 +1,521 @@
+// Character Gallery Panel — the Character Generator screen's UI for managing
+// a saved card's extra linked images (separate from the single portrait).
+// The images themselves are fetched/rendered here; scrolling through them
+// full-screen is handled by openGallery() in image-gallery.js.
+
+// Always prepended to the user's typed instruction in handleGalleryGenerate()
+// so gallery additions can never drift into a different-looking character no
+// matter what's typed — the source portrait is an identity anchor, not just
+// a style reference.
+const GALLERY_CONSISTENCY_INSTRUCTION =
+  "Keep this exact character's face, identity, hairstyle, and defining features fully consistent with the source image. Only change what is described next:";
+
+// Why the panel is locked, in both the forms the UI needs: `hint` is markup
+// for the in-page callout, `tooltip` is plain text because a title attribute
+// renders tags literally instead of formatting them. Kept together here so the
+// two states can't drift apart across the places that apply them.
+const GALLERY_LOCK_REASONS = {
+  unsaved: {
+    hint: "<strong>Save this character to the library first</strong> — the gallery is attached to a saved card, so Generate and Upload stay locked until then.",
+    tooltip: "Save this character to the library first — the gallery is attached to a saved card",
+  },
+  history: {
+    hint: "<strong>This card came from History</strong> — save it to the library to give it its own gallery.",
+    tooltip: "This card came from History — save it to the library to give it its own gallery",
+  },
+};
+
+Object.assign(CharacterGeneratorApp.prototype, {
+
+  // Single owner of the panel's locked/unlocked state, so the buttons and the
+  // hint can never disagree about whether the gallery is usable.
+  //
+  // Deliberately does NOT use the `disabled` attribute: a disabled button
+  // fires no click event at all, so clicking Generate on an unsaved card gave
+  // no notification, no console error and no clue what was wrong. Soft-locking
+  // (aria-disabled + a muted class) keeps the button focusable and clickable
+  // so the handlers can say what's missing — see _requireSavedCard().
+  //
+  // `reason` is one of GALLERY_LOCK_REASONS; ignored when unlocking.
+  _setGalleryPanelLocked(locked, reason = GALLERY_LOCK_REASONS.unsaved) {
+    const hint = document.getElementById("character-gallery-hint");
+
+    const titles = {
+      "gallery-generate-btn": "Generate new image(s) of this character from its current portrait and add them to the gallery",
+      "gallery-upload-btn": "Upload an image from your device and add it to this character's gallery",
+    };
+
+    for (const id of Object.keys(titles)) {
+      const btn = document.getElementById(id);
+      if (!btn) continue;
+      btn.classList.toggle("is-soft-disabled", locked);
+      btn.setAttribute("aria-disabled", locked ? "true" : "false");
+      btn.title = locked ? reason.tooltip : titles[id];
+    }
+
+    if (hint) {
+      hint.style.display = locked ? "flex" : "none";
+      const text = hint.querySelector("span");
+      if (text && locked) text.innerHTML = reason.hint;
+    }
+  },
+
+  // Shared precondition for every gallery action. Returns true when the panel
+  // is usable; otherwise explains why and points at the fix. Both callers used
+  // to `return` silently here, which is what made this look unwired.
+  _requireSavedCard() {
+    if (!this.currentCharacter) {
+      this.showNotification("Generate or load a character first", "warning");
+      return false;
+    }
+    if (!this.currentCardId || String(this.currentCardId).startsWith("h_")) {
+      const reason = String(this.currentCardId || "").startsWith("h_")
+        ? GALLERY_LOCK_REASONS.history
+        : GALLERY_LOCK_REASONS.unsaved;
+      this.showNotification(reason.tooltip, "warning");
+      // Draw the eye to the answer rather than just stating it.
+      const hint = document.getElementById("character-gallery-hint");
+      if (hint) {
+        hint.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        hint.classList.remove("attention-pulse");
+        void hint.offsetWidth; // restart the animation on repeat clicks
+        hint.classList.add("attention-pulse");
+      }
+      return false;
+    }
+    return true;
+  },
+
+  async _renderCharacterGalleryPanel() {
+    const strip = document.getElementById("character-gallery-strip");
+    if (!strip) return;
+
+    const cardId = this.currentCardId;
+    const isRealCard = !!cardId && !String(cardId).startsWith("h_");
+
+    const fromHistory = String(cardId || "").startsWith("h_");
+    this._setGalleryPanelLocked(
+      !isRealCard,
+      fromHistory ? GALLERY_LOCK_REASONS.history : GALLERY_LOCK_REASONS.unsaved,
+    );
+
+    strip.innerHTML = "";
+    this._characterGalleryImages = [];
+    if (!isRealCard || !this.storage) return;
+
+    const rows = await this.storage.listGalleryImages(cardId);
+    
+    this._characterGalleryImages = rows.map((row) => ({
+      id: row.id,
+      url: row.url,
+    }));
+
+    this._characterGalleryImages.forEach((img, idx) => {
+      strip.appendChild(this._buildGalleryThumb(img, idx));
+    });
+  },
+
+  _buildGalleryThumb(img, idx) {
+    const strip = document.getElementById("character-gallery-strip");
+    const thumb = document.createElement("div");
+    thumb.className = "character-gallery-thumb";
+    thumb.draggable = true;
+    thumb.dataset.galleryId = String(img.id);
+
+    const imgEl = document.createElement("img");
+    imgEl.src = img.url;
+    imgEl.alt = "Gallery image";
+    imgEl.addEventListener("click", () => {
+      this.openGallery(this._characterGalleryImages.map((g) => ({ url: g.url })), idx);
+    });
+    thumb.appendChild(imgEl);
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "gallery-thumb-delete";
+    delBtn.innerHTML = "×";
+    delBtn.title = "Remove from gallery";
+    delBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this._deleteCharacterGalleryImage(img.id);
+    });
+    thumb.appendChild(delBtn);
+
+    const setMainBtn = document.createElement("button");
+    setMainBtn.className = "gallery-thumb-set-main";
+    setMainBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>';
+    setMainBtn.setAttribute("aria-label", "Set as main portrait");
+    setMainBtn.title = "Set as main portrait (moves the current portrait into the gallery)";
+    setMainBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this._setGalleryImageAsMain(img.id);
+    });
+    thumb.appendChild(setMainBtn);
+
+    thumb.addEventListener("dragstart", (e) => {
+      thumb.classList.add("dragging");
+      e.dataTransfer.setData("text/plain", String(img.id));
+      e.dataTransfer.effectAllowed = "move";
+    });
+    thumb.addEventListener("dragend", () => thumb.classList.remove("dragging"));
+    thumb.addEventListener("dragover", (e) => e.preventDefault());
+    thumb.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const draggedId = e.dataTransfer.getData("text/plain");
+      if (!draggedId || draggedId === String(img.id) || !strip) return;
+      const draggedEl = strip.querySelector(`[data-gallery-id="${draggedId}"]`);
+      if (!draggedEl) return;
+      const rect = thumb.getBoundingClientRect();
+      const before = (e.clientX - rect.left) < rect.width / 2;
+      strip.insertBefore(draggedEl, before ? thumb : thumb.nextSibling);
+      this._persistCharacterGalleryOrder();
+    });
+
+    return thumb;
+  },
+
+  async _persistCharacterGalleryOrder() {
+    const strip = document.getElementById("character-gallery-strip");
+    if (!strip || !this.currentCardId) return;
+    const orderedIds = Array.from(strip.children).map((el) => Number(el.dataset.galleryId));
+    try {
+      await this.storage.reorderGalleryImages(this.currentCardId, orderedIds);
+      const byId = new Map(this._characterGalleryImages.map((g) => [g.id, g]));
+      this._characterGalleryImages = orderedIds.map((id) => byId.get(id)).filter(Boolean);
+    } catch (e) {
+      console.error("Failed to persist gallery order:", e);
+      this.showNotification("Failed to save new gallery order", "error");
+      this._renderCharacterGalleryPanel();
+    }
+  },
+
+  async _deleteCharacterGalleryImage(galleryId) {
+    if (!confirm("Remove this image from the gallery?")) return;
+    try {
+      await this.storage.deleteGalleryImage(this.currentCardId, galleryId);
+      await this._renderCharacterGalleryPanel();
+    } catch (e) {
+      console.error("Failed to remove gallery image:", e);
+      this.showNotification(`Failed to remove image: ${e.message}`, "error");
+    }
+  },
+
+  // Swaps a gallery image into the main portrait slot and sends the
+  // previous portrait to the gallery in its place — a genuine swap, not a
+  // discard, so nothing is lost. Uses storage.addGalleryImage/
+  // deleteGalleryImage directly rather than _addCharacterGalleryImage/
+  // _deleteCharacterGalleryImage since those show their own toast and
+  // confirm() dialog respectively — this operation wants one clean
+  // confirmation at the end, not two.
+  async _setGalleryImageAsMain(galleryId) {
+    const cardId = this.currentCardId;
+    if (!cardId) return;
+    const entry = this._characterGalleryImages?.find((g) => g.id === galleryId);
+    if (!entry) return;
+
+    try {
+      const resp = await (window.authFetch || fetch)(entry.url);
+      if (!resp.ok) throw new Error(`Failed to fetch gallery image (${resp.status})`);
+      const newMainDataUrl = await this.storage.blobToBase64(await resp.blob());
+
+      if (this.currentImageUrl) {
+        const oldMainBlob = await this.imageGenerator.convertToBlob(this.currentImageUrl);
+        const oldMainDataUrl = await this.storage.blobToBase64(oldMainBlob);
+        await this.storage.addGalleryImage(cardId, oldMainDataUrl);
+      }
+      await this.storage.deleteGalleryImage(cardId, galleryId);
+
+      this.currentImageUrl = newMainDataUrl;
+      const imageContainer = document.getElementById("image-content");
+      if (imageContainer) {
+        imageContainer.innerHTML = window.imageGenerator?.formatImageForDisplay
+          ? window.imageGenerator.formatImageForDisplay(newMainDataUrl)
+          : `<div class="image-container"><img src="${newMainDataUrl}" alt="Character portrait" class="generated-image"></div>`;
+      }
+      if (typeof this.updateCropButtonVisibility === "function") this.updateCropButtonVisibility();
+
+      await this._renderCharacterGalleryPanel();
+      this.showNotification("Set as main image — previous portrait moved to the gallery.", "success");
+
+      await this.saveCardToLibrary();
+      await this.refreshLibraryViews();
+    } catch (e) {
+      console.error("Failed to set gallery image as main:", e);
+      this.showNotification(`Failed to set as main image: ${e.message}`, "error");
+    }
+  },
+
+  async _addCharacterGalleryImage(dataUrl) {
+    if (!this.currentCardId) return;
+    try {
+      await this.storage.addGalleryImage(this.currentCardId, dataUrl);
+      this.showNotification("Added to gallery", "success");
+      await this._renderCharacterGalleryPanel();
+    } catch (e) {
+      console.error("Failed to add gallery image:", e);
+      this.showNotification(`Failed to add gallery image: ${e.message}`, "error");
+    }
+  },
+
+  _clearCharacterGallery() {
+    const strip = document.getElementById("character-gallery-strip");
+    if (strip) strip.innerHTML = "";
+    this._setGalleryPanelLocked(true, GALLERY_LOCK_REASONS.unsaved);
+    this._characterGalleryImages = [];
+    this._pendingGalleryImages = [];
+    this._renderGalleryGeneratePreview();
+  },
+
+  // Rebuilds the #gallery-generate-instructions box list to match Count
+  // (1/2/4, see #gallery-generate-count) — each generated image gets its own
+  // independent instruction rather than one prompt shared across the whole
+  // batch, so a Count-of-4 run can be 4 different poses/scenes in one go.
+  // Preserves already-typed text across a count change (e.g. 2 -> 4 keeps
+  // the first two boxes as they were) instead of wiping everything.
+  _renderGalleryInstructionInputs() {
+    const container = document.getElementById("gallery-generate-instructions");
+    if (!container) return;
+    const count = parseInt(document.getElementById("gallery-generate-count")?.value, 10) || 1;
+
+    const existingValues = Array.from(container.querySelectorAll(".gallery-instruction-input")).map((el) => el.value);
+
+    container.innerHTML = "";
+    for (let i = 0; i < count; i++) {
+      const row = document.createElement("div");
+      row.style.cssText = "display: flex; gap: 0.5rem; align-items: flex-start;";
+
+      if (count > 1) {
+        const label = document.createElement("span");
+        label.textContent = `${i + 1}.`;
+        label.style.cssText = "font-size: 0.75rem; color: var(--text-secondary); padding-top: 0.55rem; min-width: 1.1rem;";
+        row.appendChild(label);
+      }
+
+      const textarea = document.createElement("textarea");
+      textarea.className = "input gallery-instruction-input";
+      textarea.rows = 2;
+      textarea.maxLength = 1000;
+      textarea.placeholder = count > 1
+        ? `Image ${i + 1} — e.g. sitting by a campfire at night, same character`
+        : "Describe the new pose/scene/outfit — e.g. sitting by a campfire at night, same character | wearing a blue dress, waving";
+      textarea.value = existingValues[i] || "";
+      // Pasting an image here (as opposed to text) adds it straight to the
+      // gallery instead of being silently swallowed by the textarea — bound
+      // directly on this field, not document, so it can't be hijacked by or
+      // steal from any other paste zone on the page (see
+      // handleReferenceImagePaste in main.js / handlePlaygroundImagePaste in
+      // image-playground.js for the same per-field scoping).
+      textarea.addEventListener("paste", (e) => this.handleGalleryInstructionPaste(e));
+      row.appendChild(textarea);
+
+      container.appendChild(row);
+    }
+  },
+
+  // A pasted image is unrelated to the typed instruction text, so this only
+  // intercepts the event (preventDefault/stopPropagation) when the clipboard
+  // actually carries an image — a plain text paste passes through untouched.
+  async handleGalleryInstructionPaste(event) {
+    const file = this._extractPastedImageFile(event);
+    if (!file) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!this.currentCardId) {
+      this.showNotification("Save this character to the library first", "warning");
+      return;
+    }
+    try {
+      const dataUrl = await this.storage.blobToBase64(file);
+      await this._addCharacterGalleryImage(dataUrl);
+    } catch (e) {
+      console.error("Failed to add pasted image to gallery:", e);
+      this.showNotification(`Failed to add pasted image: ${e.message}`, "error");
+    }
+  },
+
+  // Image-to-image from the card's current portrait (not a fresh
+  // text-to-image roll from the character description, which is what this
+  // used to do) — GALLERY_CONSISTENCY_INSTRUCTION is always prepended to
+  // every instruction so results stay recognizably this character regardless
+  // of what's typed. One independent edit call per instruction box, run in
+  // parallel.
+  async handleGalleryGenerate() {
+    if (!this._requireSavedCard()) return;
+    if (!this.currentImageUrl) {
+      this.showNotification("This character needs a portrait image first", "warning");
+      return;
+    }
+
+    const instructionEls = Array.from(document.querySelectorAll("#gallery-generate-instructions .gallery-instruction-input"));
+    const instructions = instructionEls.map((el) => el.value.trim());
+    // An empty list would sail past the findIndex check below (-1 == "none
+    // empty"), fire zero requests, and surface as a bare "Image generation
+    // failed" — so catch it here and rebuild the boxes instead.
+    if (instructions.length === 0) {
+      this.showNotification("Describe the new pose/scene/outfit first", "warning");
+      this._renderGalleryInstructionInputs();
+      return;
+    }
+    const emptyIndex = instructions.findIndex((text) => !text);
+    if (emptyIndex !== -1) {
+      this.showNotification(
+        instructions.length > 1 ? `Describe image #${emptyIndex + 1} first` : "Describe the new pose/scene/outfit first",
+        "warning"
+      );
+      instructionEls[emptyIndex]?.focus();
+      return;
+    }
+
+    const imageReady = this.config.engineReady("image");
+    if (!imageReady) {
+      this.showNotification(window.engrai.missing("image"), "warning");
+      return;
+    }
+
+    const editModel = this.config.get("api.image.editModel") || "flux-2-pro-image-to-image";
+    const count = instructions.length;
+
+    const btn = document.getElementById("gallery-generate-btn");
+    if (btn) { btn.disabled = true; btn.textContent = count > 1 ? `Generating ${count}…` : "Generating..."; }
+
+    try {
+      const sourceBlob = await this.imageGenerator.convertToBlob(this.currentImageUrl);
+      const imageBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("Failed to read current image"));
+        reader.readAsDataURL(sourceBlob);
+      });
+
+      const results = await Promise.allSettled(
+        instructions.map((instruction) =>
+          window.apiHandler.editImage({
+            imageBase64,
+            instruction: `${GALLERY_CONSISTENCY_INSTRUCTION} ${instruction}`,
+            model: editModel,
+          })
+        )
+      );
+
+      const pending = [];
+      let failures = 0;
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        if (result.status !== "fulfilled") {
+          failures++;
+          console.error("Gallery generate error:", result.reason);
+          continue;
+        }
+        pending.push({ url: await this._urlToDataUrl(result.value), instruction: instructions[i], model: editModel });
+      }
+
+      if (pending.length === 0) {
+        throw results.find((r) => r.status === "rejected")?.reason || new Error("Image generation failed");
+      }
+
+      this._pendingGalleryImages = pending;
+      this._renderGalleryGeneratePreview();
+
+      if (failures > 0) {
+        this.showNotification(`Generated ${pending.length} of ${count} (${failures} failed)`, "warning");
+      }
+    } catch (error) {
+      console.error("Gallery image generation failed:", error);
+      this.showNotification(`Image generation failed: ${error.message}`, "error");
+    } finally {
+      // Genuine `disabled` is correct here (an in-flight request really must
+      // not be re-fired), unlike the unsaved-card case which soft-locks.
+      if (btn) { btn.disabled = false; btn.textContent = "Generate"; }
+    }
+  },
+
+  // Renders one card per pending generated image, each with its own
+  // Add/Discard — needed once Count above can produce more than one result
+  // at a time.
+  _renderGalleryGeneratePreview() {
+    const preview = document.getElementById("gallery-generate-preview");
+    const list = document.getElementById("gallery-generate-preview-list");
+    if (!preview || !list) return;
+
+    const images = this._pendingGalleryImages || [];
+    if (images.length === 0) {
+      preview.style.display = "none";
+      list.innerHTML = "";
+      return;
+    }
+
+    preview.style.display = "block";
+    list.innerHTML = "";
+    images.forEach((entry, index) => {
+      const item = document.createElement("div");
+      item.style.cssText = "width: 140px; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; background: var(--surface-muted);";
+      item.innerHTML = `
+        <img src="${entry.url}" alt="Generated preview ${index + 1}" title="Click to view full size" style="width: 100%; height: 140px; object-fit: cover; display: block; cursor: pointer;" data-gallery-view-index="${index}" />
+        <div style="display: flex; gap: 0.3rem; padding: 0.4rem;">
+          <button type="button" class="btn-primary btn-small" style="flex: 1; font-size: 0.7rem; padding: 0.3rem;" data-gallery-accept-index="${index}">Add</button>
+          <button type="button" class="btn-outline btn-small" style="flex: 1; font-size: 0.7rem; padding: 0.3rem;" data-gallery-discard-index="${index}">Discard</button>
+        </div>
+      `;
+      list.appendChild(item);
+    });
+  },
+
+  // Opens the full-screen lightbox (image-gallery.js) on a pending, not-yet-
+  // saved candidate — context 'galleryPending' swaps its Use button for an
+  // Add-to-Gallery action and reveals a Discard button (see openGallery()/
+  // _galleryUse()/_galleryDiscardPending() in image-gallery.js), so accept-
+  // or-dismiss can happen from the enlarged view instead of only the
+  // 140px thumbnail.
+  _openGalleryPendingPreview(index) {
+    const images = (this._pendingGalleryImages || []).map((entry, i) => ({
+      url: entry.url,
+      prompt: entry.instruction,
+      model: entry.model,
+      label: `Preview ${i + 1}`,
+    }));
+    if (images.length === 0) return;
+    this.openGallery(images, index, 'galleryPending');
+  },
+
+  async handleGalleryGenerateAcceptOne(index) {
+    const entry = this._pendingGalleryImages?.[index];
+    if (!entry) return;
+    await this._addCharacterGalleryImage(entry.url);
+    this._pendingGalleryImages.splice(index, 1);
+    this._renderGalleryGeneratePreview();
+  },
+
+  handleGalleryGenerateDiscardOne(index) {
+    if (!this._pendingGalleryImages) return;
+    this._pendingGalleryImages.splice(index, 1);
+    this._renderGalleryGeneratePreview();
+  },
+
+  async handleGalleryGenerateAcceptAll() {
+    const images = this._pendingGalleryImages || [];
+    for (const entry of images) {
+      await this._addCharacterGalleryImage(entry.url);
+    }
+    this._pendingGalleryImages = [];
+    this._renderGalleryGeneratePreview();
+  },
+
+  handleGalleryGenerateDiscard() {
+    this._pendingGalleryImages = [];
+    this._renderGalleryGeneratePreview();
+  },
+
+  async handleGalleryUpload(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !this.currentCardId) return;
+    try {
+      const dataUrl = await this.storage.blobToBase64(file);
+      await this._addCharacterGalleryImage(dataUrl);
+    } catch (e) {
+      console.error("Failed to upload gallery image:", e);
+      this.showNotification(`Failed to upload image: ${e.message}`, "error");
+    }
+  },
+
+});

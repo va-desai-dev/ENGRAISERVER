@@ -42,17 +42,18 @@ def test_parse_device_list_distinguishes_rocm_and_vulkan_views() -> None:
 
 
 @pytest.mark.parametrize("engine_id", ["MTL0", "Metal0"])
-def test_probe_devices_executes_the_selected_binary(tmp_path: Path, engine_id: str) -> None:    executable = tmp_path / "llama-server"
+def test_probe_devices_executes_the_selected_binary(tmp_path: Path, engine_id: str) -> None:
+    executable = tmp_path / "llama-server"
     executable.write_text(
         "#!/bin/sh\nprintf '%s\\n' 'Available devices:' "
-               f"'  {engine_id}: Apple M4 Max (49152 MiB, 40000 MiB free)'\n",
+        f"'  {engine_id}: Apple M4 Max (49152 MiB, 40000 MiB free)'\n",
         encoding="utf-8",
     )
     executable.chmod(0o755)
 
     devices = probe_devices(executable)
-   assert devices[0].engine_id == engine_id    
-   assert devices[0].backend == "metal"
+    assert devices[0].engine_id == engine_id
+    assert devices[0].backend == "metal"
 
 
 

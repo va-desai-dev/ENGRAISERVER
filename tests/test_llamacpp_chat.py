@@ -202,6 +202,44 @@ def control_plane(tmp_path: Path, handler) -> LlamaCppControlPlane:  # type: ign
 
 
 @pytest.mark.asyncio
+async def test_topic_planning_preserves_schema_and_disables_thinking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    schema = {"type": "object", "properties": {
+        "topics": {"type": "array", "maxItems": 5, "items": {"type": "string", "maxLength": 120}},
+    }, "required": ["topics"], "additionalProperties": False}
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/props":
+            return httpx.Response(200, json={"chat_template": GEMMA4})
+        seen.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json={"content": '{"topics":["Saltmarket"]}', "stop_type": "eos"})
+
+    control = control_plane(tmp_path, handler)
+    monkeypatch.setattr(control, "ensure_model", AsyncMock(return_value=False))
+    request = {
+        "model": "gemma", "messages": [{"role": "user", "content": "Suggest lorebook topics."}],
+        "response_format": {"type": "json_object", "schema": schema},
+        "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 1536,
+    }
+    try:
+        response, stream = await control.forward_openai(
+            "POST", "chat/completions", json.dumps(request).encode(), "", "application/json"
+        )
+        result = json.loads(b"".join([chunk async for chunk in stream]))
+        assert response.status_code == 200
+        assert result["choices"][0]["message"]["content"] == '{"topics":["Saltmarket"]}'
+        endpoint, body = seen[0]
+        assert endpoint == "/completion" and body["json_schema"] == schema
+        assert body["n_predict"] == 1536
+        assert "<|think|>" not in body["prompt"]
+        assert body["prompt"].endswith("<|turn>model\n<|channel>thought\n<channel|>")
+    finally:
+        await control.client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_chat_completions_stream_through_the_raw_completion_endpoint(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

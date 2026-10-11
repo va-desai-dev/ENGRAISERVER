@@ -112,6 +112,7 @@ never reachable by client devices.
 | Engine capability and argument mapping | `src/engrai_server/engines/` |
 | API and orchestration | `src/engrai_server/` |
 | Presentation source | `ui/` |
+| Card Studio (API, library, browser app) | `src/engrai_server/cardgen/` |
 | Shipped presentation | `src/engrai_server/static/` |
 
 The repository never treats an executable command as model identity. A model

@@ -292,18 +292,6 @@ class LlamaCppControlPlane:
         self.verified_runtime_path = str(status["path"])
         return status, executable, devices
 
-    async def resolve_deployment(self, deployment: DeploymentProfile) -> DeploymentProfile:
-        status, _, devices = await self._components()
-        try:
-            validate_extra_arguments(deployment.advanced.extra_arguments)
-        except ValueError as exc:
-            raise LlamaCppError(str(exc)) from exc
-        return plan_deployment(
-            deployment,
-            backend=str(status["backend"]),
-            devices=devices,
-        )
-
     async def compile(self, profile: RouteProfile) -> tuple[DeploymentProfile, LaunchSpec]:
         try:
             deployment = self.deployments.get(profile.id)

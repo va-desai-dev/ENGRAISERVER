@@ -26,6 +26,7 @@ from pydantic import ValidationError
 
 from . import preflight
 from .auth import build_dependencies
+from .cardgen import create_cardgen
 from .credentials import CredentialError, CredentialStore
 from .domain.deployments import DeploymentProfile
 from .domain.store import DeploymentStore
@@ -134,6 +135,15 @@ class ImmutableStaticFiles(StaticFiles):
 
 
 app.mount("/assets", ImmutableStaticFiles(directory=static_dir / "assets"), name="assets")
+
+# Card Studio: the character-card authoring app, served at /cardgen/. It signs
+# in with the console session and generates with whatever is loaded here.
+create_cardgen(
+    credentials=credentials,
+    control=control,
+    images=images,
+    data_dir=settings.cardgen_data_dir,
+)(app)
 
 
 # Every GET route reachable without credentials also answers HEAD. RFC 9110
