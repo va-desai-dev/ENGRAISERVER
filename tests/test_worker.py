@@ -13,16 +13,28 @@ from engrai_server.engines.worker import ManagedWorker, WorkerEndpoint, WorkerEr
 
 
 @pytest.mark.asyncio
-async def test_managed_worker_owns_llama_server_lifecycle(tmp_path: Path) -> None:
+@pytest.mark.parametrize("proxy_environment", [False, True])
+async def test_managed_worker_owns_llama_server_lifecycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, proxy_environment: bool,
+) -> None:
+    if proxy_environment:
+        for name in ("http_proxy", "https_proxy", "all_proxy", "no_proxy"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")
+        monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+        monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:1")
+        monkeypatch.setenv("NO_PROXY", "")
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
 
     script = tmp_path / "llama server fake.py"
     script.write_text(
-        """import json
+        """print('fake worker starting', flush=True)
+import json
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler
+from socketserver import TCPServer
 
 args = sys.argv[1:]
 host = args[args.index('--host') + 1]
@@ -43,7 +55,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-HTTPServer((host, port), Handler).serve_forever()
+# HTTPServer.server_bind performs a reverse DNS lookup via getfqdn, which is
+# unrelated to this loopback lifecycle contract and can stall on CI hosts.
+with TCPServer((host, port), Handler) as server:
+    print('fake worker listening', flush=True)
+    server.serve_forever()
 """,
         encoding="utf-8",
     )
@@ -76,7 +92,7 @@ HTTPServer((host, port), Handler).serve_forever()
         assert status["ready"] is True
         assert status["owned"] is True
         assert worker.state.phase == "ready"
-        assert worker.launch_log() == ""
+        assert "fake worker listening" in worker.launch_log()
         assert json.loads(state_path.read_text())["deployment"] == "example-local"
         assert state_path.stat().st_mode & 0o777 == 0o600
     finally:
