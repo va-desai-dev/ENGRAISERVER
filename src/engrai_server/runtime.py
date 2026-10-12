@@ -15,6 +15,7 @@ import os
 import platform
 import re
 import shutil
+import sys
 import tarfile
 import tempfile
 from dataclasses import asdict, dataclass
@@ -477,6 +478,22 @@ def inspect_runtime(
 ) -> dict[str, Any]:
     policy_for(runtime_id)
     directory = _active_directory(runtime_root, runtime_id)
+    # A standalone CLI carries verified defaults beside its executable. Keep
+    # explicit runtime stores and user-installed engines authoritative; never
+    # hide a broken active installation by silently falling back.
+    if directory is None and getattr(sys, "frozen", False):
+        from .settings import application_paths
+
+        bundled = Path(sys.executable).resolve().parent / "runtimes"
+        has_record = _active_path(runtime_root, runtime_id).exists() or (
+            runtime_id == TEXT_RUNTIME and (runtime_root / ACTIVE_NAME).exists()
+        )
+        if (
+            not has_record
+            and runtime_root.resolve() == (application_paths().data / "runtimes").resolve()
+            and bundled.resolve() != runtime_root.resolve()
+        ):
+            return inspect_runtime(bundled, runtime_id, verify=verify)
     base: dict[str, Any] = {
         "runtime": runtime_id,
         "root": str(runtime_root),

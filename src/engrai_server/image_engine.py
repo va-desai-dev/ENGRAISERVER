@@ -16,6 +16,7 @@ import httpx
 from .engines.sdcpp import SdCppDevice, SdCppError, SdCppProbe, compile_image_launch, probe_devices
 from .image_profiles import ImageProfile, ImageProfileStore
 from .runtime import IMAGE_RUNTIME, inspect_runtime
+from .engines.worker import native_worker_environment
 from .settings import Settings
 
 SDCPP = "stable-diffusion.cpp"
@@ -323,6 +324,7 @@ class ImageControlPlane:
             stdin=asyncio.subprocess.DEVNULL,
             stdout=self.log_handle,
             stderr=asyncio.subprocess.STDOUT,
+            env=native_worker_environment(),
             start_new_session=True,
         )
         self.state.pid = self.process.pid

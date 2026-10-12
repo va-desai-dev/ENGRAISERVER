@@ -2,9 +2,10 @@
 
 This document is for engine developers and release maintainers. ENGRAISERVER
 must supply or acquire compatible verified runtimes for end users; compiling
-engines is not the intended installation experience. During the source-stage
-preview, bundles are installed manually and public downloads are not yet
-provided. For everyday use, see [INSTALL.md](INSTALL.md).
+engines is not the intended installation experience. Complete CLI archives embed
+both runtimes; source installations use the manual workflow below. Public
+downloads still require release qualification and publication. For everyday
+use, see [INSTALL.md](INSTALL.md).
 
 ENGRAI owns the engine lifecycle, build provenance, network boundary, process
 arguments, and observable behavior. llama.cpp (text) and stable-diffusion.cpp

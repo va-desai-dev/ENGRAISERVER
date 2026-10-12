@@ -8,6 +8,7 @@ import ipaddress
 import json
 import os
 import signal
+import sys
 import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
@@ -21,6 +22,19 @@ from .protocol import LaunchSpec
 
 class WorkerError(RuntimeError):
     """A worker could not be launched, reached, or stopped cleanly."""
+
+
+def native_worker_environment(overrides: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Keep the frozen Python loader's library search path out of native engines."""
+    environment = dict(os.environ)
+    if getattr(sys, "frozen", False) and sys.platform.startswith("linux"):
+        original = environment.get("LD_LIBRARY_PATH_ORIG")
+        if original is None:
+            environment.pop("LD_LIBRARY_PATH", None)
+        else:
+            environment["LD_LIBRARY_PATH"] = original
+    environment.update(overrides or {})
+    return environment
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,7 +276,7 @@ class ManagedWorker:
                 except OSError:
                     self.log_start_offset = 0
                 self.log_handle = self.log_path.open("ab", buffering=0)
-                environment: Mapping[str, str] = {**os.environ, **launch.environment}
+                environment = native_worker_environment(launch.environment)
                 self.process = await asyncio.create_subprocess_exec(
                     *launch.command(),
                     stdin=asyncio.subprocess.DEVNULL,

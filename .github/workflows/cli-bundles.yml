@@ -1,0 +1,62 @@
+name: Build complete CLI bundles
+
+# Build reviewable artifacts. Publishing a release is a separate maintainer step.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: linux-x86_64-cpu
+            backend: cpu
+          - runner: ubuntu-22.04-arm
+            target: linux-aarch64-cpu
+            backend: cpu
+          - runner: macos-14
+            target: macos-aarch64-metal
+            backend: metal
+          - runner: macos-15-intel
+            target: macos-x86_64-cpu
+            backend: cpu
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.18"
+      - name: Install build dependencies (maintainer environment only)
+        run: uv sync --frozen --extra dev
+      - name: Test runtime and installer contracts
+        run: uv run pytest tests/test_runtime.py tests/test_cli.py tests/test_cli_bundle.py tests/test_cli_installer.py tests/test_host.py tests/test_worker.py tests/test_image_generation.py
+      - name: Fetch pinned engine sources
+        run: uv run python scripts/fetch-engine-sources.py
+      - name: Build both inference engines
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: |
+          uv run python scripts/build-runtime.py --engine llama.cpp --backend "$BACKEND" --jobs 3
+          uv run python scripts/build-runtime.py --engine stable-diffusion.cpp --backend "$BACKEND" --jobs 3
+      - name: Package and check the standalone CLI
+        shell: bash
+        run: |
+          text=(dist/runtime/engrai-text-*.tar.gz)
+          image=(dist/runtime/engrai-image-*.tar.gz)
+          uv run --with pyinstaller==6.22.3 python scripts/build-cli-bundle.py \
+            --text-runtime "${text[0]}" --image-runtime "${image[0]}"
+      - name: Install and update without developer tools
+        env:
+          ENGRAI_TEST_CLI_BUNDLE: dist/cli/engrai-server-${{ matrix.target }}.tar.gz
+        run: uv run pytest tests/test_cli_installer.py -k real_bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engrai-server-${{ matrix.target }}
+          path: dist/cli/*
+          if-no-files-found: error

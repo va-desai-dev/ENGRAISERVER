@@ -1,9 +1,10 @@
 # Source installation — preview testers and developers
 
-This is a temporary source-stage setup path, not the intended end-user
-installation experience. See [Running ENGRAISERVER](INSTALL.md) for everyday
-use. App installers and prebuilt ENGRAI runtime downloads are still release
-work; do not assume a published PyPI package or native release is available.
+This path is for contributors who need a checkout. See
+[Running ENGRAISERVER](INSTALL.md) for the complete CLI installer and everyday
+use. The standalone bundle workflow includes both engines, but its archives
+must be published before the download installer is usable. Do not assume a
+published PyPI package or native release is available.
 
 ## Install an independent app command
 

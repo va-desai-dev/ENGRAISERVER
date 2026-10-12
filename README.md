@@ -26,10 +26,23 @@ no provider settings of its own. See [CARD-STUDIO.md](docs/CARD-STUDIO.md).
 
 ## Quick start
 
-With ENGRAISERVER installed, open a terminal in any directory:
+The standalone CLI installer downloads ENGRAI **with both inference engines
+and its own Python runtime**. No Git, Python installation, uv, source checkout,
+or compiler is required on the user's computer.
+
+**Release availability:** the installer and bundle build workflow are in this
+repository; platform archives must be built, qualified, and published before
+the download command below can succeed. See [CLI bundles](docs/CLI-BUNDLES.md).
+
+Once a release is published, install from any directory:
 
 ```bash
-engrai-server init   # first-time setup
+curl -fsSL https://raw.githubusercontent.com/va-desai-dev/ENGRAISERVER/master/scripts/install.sh | sh
+```
+
+Open a new terminal if the installer added the command to PATH, then start:
+
+```bash
 engrai-server serve
 ```
 
@@ -38,17 +51,10 @@ account. On subsequent launches, just run `engrai-server serve`. No `uv run`,
 environment activation, or source-directory path belongs in everyday use.
 The installed app keeps its configuration and models outside the source tree.
 
-**Installation availability:** this is still a source-stage preview. A public
-app installer and ready-to-download ENGRAI runtime bundles are not yet
-provided. The anywhere-on-your-system CLI already works after installation;
-the zero-toolchain installation experience is still a release requirement,
-not a feature we claim to have shipped. Early testers can use the separate
-[source installation guide](docs/SOURCE-INSTALL.md).
-
-Generation needs a compatible ENGRAI runtime and model files. The product
-requirement is for ENGRAISERVER to supply or acquire verified runtimes without
-asking users to compile engines. Current manual runtime setup is documented
-for developers in [RUNTIMES.md](docs/RUNTIMES.md).
+Standalone bundles include the text and image engines; model weights download
+separately through the console. Source contributors can still use the
+[source installation guide](docs/SOURCE-INSTALL.md) and build engines using
+[RUNTIMES.md](docs/RUNTIMES.md).
 
 See [Running ENGRAISERVER](docs/INSTALL.md) for models, client connections,
 background operation, and troubleshooting.
@@ -56,7 +62,8 @@ background operation, and troubleshooting.
 ## Documentation
 
 - [Running ENGRAISERVER](docs/INSTALL.md): everyday commands, models, and services.
-- [Source installation](docs/SOURCE-INSTALL.md): temporary preview setup for early testers.
+- [CLI bundles](docs/CLI-BUNDLES.md): complete archives, updates, and maintainer builds.
+- [Source installation](docs/SOURCE-INSTALL.md): checkout-based development setup.
 - [Contributing](docs/CONTRIBUTING.md): tests, UI development, and packaging.
 - [Containers and Kubernetes](deploy/CONTAINERS.md): build and deploy your own image.
 - [Public release preparation](docs/PUBLIC-RELEASE.md): local review and first publication.

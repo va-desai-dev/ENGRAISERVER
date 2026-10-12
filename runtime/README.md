@@ -9,9 +9,11 @@ or `PATH` binaries are never accepted by the installer.
 | `llama.cpp.lock.json` | `engrai-text` | `bin/engrai-text-worker` (llama.cpp `llama-server`) |
 | `stable-diffusion.cpp.lock.json` | `engrai-image` | `bin/engrai-image-worker` (stable-diffusion.cpp `sd-server`) |
 
-Compiled binaries are never committed. Release bundles are built per runtime,
-operating system, architecture, and backend. Until bundles are published, use
-the source-build instructions in [INSTALL.md](../docs/INSTALL.md). A bundle
+Compiled binaries are never committed. Maintainer runtime bundles are built per
+runtime, operating system, architecture, and backend. The end-user
+[complete CLI archive](../docs/CLI-BUNDLES.md) embeds both runtimes together.
+Until complete archives are published, use the developer build instructions
+in [RUNTIMES.md](../docs/RUNTIMES.md). An individual runtime bundle
 contains:
 
 - the worker, built statically with the upstream web UI disabled;

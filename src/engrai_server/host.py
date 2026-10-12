@@ -97,6 +97,11 @@ def resolve_cli_executable(explicit: str | Path | None = None) -> Path:
             return candidate
         raise HostServiceError(f"CLI executable is not runnable: {candidate}")
 
+    # The frozen executable lives in a versioned directory. A service must
+    # invoke the installer's stable launcher to follow app updates on restart.
+    if getattr(sys, "frozen", False) and (launcher := os.environ.get("ENGRAI_CLI_LAUNCHER")):
+        return resolve_cli_executable(launcher)
+
     invoked = Path(sys.argv[0]).expanduser()
     if invoked.name == "engrai-server":
         candidate = invoked.resolve()

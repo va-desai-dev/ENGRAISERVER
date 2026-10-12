@@ -48,9 +48,10 @@ supported release platform:
   without making users edit engine flags or internal configuration files.
 - Updates preserve user state, and install/update/uninstall behavior is tested.
 
-The installer and automatic runtime-acquisition portions are not implemented
-yet. Keep that limitation visible until the release artifacts and onboarding
-actually satisfy it. Source-preview setup belongs in
+The complete CLI installer and build workflow are implemented; see
+[CLI-BUNDLES.md](CLI-BUNDLES.md). Every standalone archive must include both
+verified runtimes. Build, qualify, and publish the platform archives before
+advertising the install command as available. Source-preview setup belongs in
 [SOURCE-INSTALL.md](SOURCE-INSTALL.md), not the primary app launch instructions.
 
 Developer validation remains separate:

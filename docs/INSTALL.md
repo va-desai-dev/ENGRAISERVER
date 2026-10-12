@@ -7,27 +7,35 @@ inference engines.
 
 ## Installation availability
 
-The current preview supports Linux and macOS, but a public app installer and
-downloadable ENGRAI runtime bundles are not yet provided. There is not yet a
-complete no-toolchain installation path to recommend to end users.
+The CLI installer downloads a complete platform bundle: ENGRAI, its private
+Python runtime, the web interface, and both text and image inference engines.
+Users do not need Git, Python, uv, Node.js, or a compiler.
 
-If you are testing this source-stage preview, follow
-[Source installation](SOURCE-INSTALL.md) once. Those developer tools are a
-temporary preview requirement, not the intended product experience. A public
-installer must provide the app command and a compatible verified runtime
-without requiring users to install uv, activate an environment, or use CMake.
+The installer and build workflow are implemented, but release archives still
+need to be qualified and published. Until then, use the developer-only
+[source installation](SOURCE-INSTALL.md). See [CLI bundles](CLI-BUNDLES.md)
+for the release matrix and exact publication requirements.
+
+After release archives are published, run this from any folder:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/va-desai-dev/ENGRAISERVER/master/scripts/install.sh | sh
+```
+
+The installer handles file placement and first-time initialization. Open a
+new terminal if it reports a PATH change. To update, stop the server, rerun
+the same installer, then start the server again. Saved work is preserved.
 
 ## Launch from anywhere
 
 After installation, open a terminal in any directory:
 
 ```bash
-engrai-server init
 engrai-server serve
 ```
 
-`init` is first-time setup; it preserves existing configuration. For everyday
-launches, only `engrai-server serve` is needed. No `cd`, directory path,
+For source installations only, run `engrai-server init` once first; it
+preserves existing configuration. No `cd`, directory path,
 `uv run`, or environment activation is required.
 
 Open **http://127.0.0.1:8400** and create your administrator account. Leave the
@@ -48,11 +56,10 @@ engrai-server runtime status --runtime image
 engrai-server preflight
 ```
 
-Text and image generation use separate runtimes; text does not require the
-image runtime. Automatic runtime acquisition is not implemented yet. During
-this preview, missing runtimes require a compatible bundle supplied by a
-maintainer or the developer build workflow in [RUNTIMES.md](RUNTIMES.md).
-Compiling engines is not the intended end-user setup path.
+Standalone archives embed both runtimes, and a fresh installation discovers
+them automatically. No separate runtime installation is needed. An explicitly
+installed runtime in the user's data directory takes precedence. Source-only
+installs still need the developer workflow in [RUNTIMES.md](RUNTIMES.md).
 
 ## Add a model and connect a client
 
@@ -63,8 +70,8 @@ Compiling engines is not the intended end-user setup path.
    These are GGUF file choices, not a guarantee of runtime compatibility;
    auxiliary projectors are excluded. For other files, use **Advanced**.
    For existing downloads, configure search directories under **Profile and access**.
-2. Create a **New route**, select the model and deployment settings, save,
-   then load it. For images, use **New image model** and provide the required
+2. Under **Text Models**, choose **New Profile**, select the model and deployment
+   settings, save, then load it. Under **Image Models**, use **New Profile** and provide the required
    checkpoint, encoder, and VAE. See [DIFFUSION-MODELS.md](DIFFUSION-MODELS.md).
 3. Create a client API key under **Profile and access** and retain the revealed
    secret. It is distinct from the administrator password.
@@ -128,13 +135,14 @@ of the directory from which you launch the app:
 | Data | Directory |
 | --- | --- |
 | Configuration and routes | `~/.config/engrai-server/` |
-| Runtime bundles | `~/.local/share/engrai-server/` |
+| Installed app, user runtimes, Card Studio library | `~/.local/share/engrai-server/` |
 | Credentials, logs, process state | `~/.local/state/engrai-server/` |
 | Disposable cache | `~/.cache/engrai-server/` |
 
 Advanced installations can override XDG roots or set `ENGRAI_HOME` to an
 absolute directory consistently for every command. No override is needed for
-normal use. Back up configuration and state before updates. Source-preview
+normal use. Back up configuration, state, and the `cardgen/` data directory
+before updates. Source-preview
 update instructions are in [SOURCE-INSTALL.md](SOURCE-INSTALL.md#updates-and-local-changes).
 
 ## Troubleshooting
