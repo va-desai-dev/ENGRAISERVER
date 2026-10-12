@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import platform
+import shlex
 import shutil
 import stat
 import subprocess
@@ -75,6 +76,14 @@ def run(*arguments: str, cwd: Path | None = None) -> str:
         detail = (completed.stderr or completed.stdout).strip()
         raise SystemExit(f"command failed ({' '.join(arguments)}):\n{detail}")
     return completed.stdout.strip()
+
+
+def run_build(*arguments: str) -> None:
+    """Stream compiler progress to the terminal and CI log as it happens."""
+    print(f"+ {shlex.join(arguments)}", flush=True)
+    completed = subprocess.run(arguments)
+    if completed.returncode:
+        raise SystemExit(f"build command exited with status {completed.returncode}")
 
 
 def digest(path: Path) -> str:
@@ -382,8 +391,8 @@ def main() -> int:
         else ROOT / "build" / f"{runtime_id}-{operating_system}-{architecture}-{args.backend}"
     )
     options = engine.options(args.backend, args.native, args.cmake_option)
-    run("cmake", "-S", str(source), "-B", str(build_dir), *options)
-    run(
+    run_build("cmake", "-S", str(source), "-B", str(build_dir), *options)
+    run_build(
         "cmake",
         "--build",
         str(build_dir),

@@ -112,6 +112,7 @@ class ManagedWorker:
         self.client = httpx.AsyncClient(
             base_url=endpoint.base_url,
             timeout=httpx.Timeout(30.0, read=None),
+            trust_env=False,  # Private loopback traffic must never use a host proxy.
         )
         self.lifecycle_lock = asyncio.Lock()
         self.process: asyncio.subprocess.Process | None = None
@@ -225,9 +226,13 @@ class ManagedWorker:
                 if result.detail:
                     last_error = result.detail
             except httpx.HTTPError as exc:
-                last_error = str(exc)
+                last_error = f"{type(exc).__name__}: {exc}"
             await asyncio.sleep(0.5)
-        raise WorkerError(last_error)
+        tail = self._log_tail()
+        raise WorkerError(
+            f"{self.provider} readiness timed out at {self.endpoint.base_url}: {last_error}"
+            + (f"\nWorker log:\n{tail}" if tail else "\nWorker log is empty.")
+        )
 
     async def _stop_owned_process(self) -> None:
         process = self.process

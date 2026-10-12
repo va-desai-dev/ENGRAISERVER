@@ -85,6 +85,13 @@ both pinned engines on each host, freezes the Python CLI with PyInstaller,
 checks runtime receipts after relocating the result, and uploads the complete
 archives and SHA-256 sidecars as workflow artifacts. It does not publish a release.
 
+CMake progress streams into separate text-engine and image-engine build steps.
+The Linux archives built on Ubuntu 22.04 are also installed and run on Ubuntu
+24.04 runners for both architectures. These checks use fresh user directories,
+block developer commands from the installed application's PATH, and verify
+startup, account creation, and saved-card preservation across reinstall. They
+do not exercise model inference or qualify every Linux distro.
+
 For a local build, use the existing engine build workflow first:
 
 ```sh

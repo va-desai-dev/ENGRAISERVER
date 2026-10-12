@@ -38,12 +38,14 @@ jobs:
         run: uv run pytest tests/test_runtime.py tests/test_cli.py tests/test_cli_bundle.py tests/test_cli_installer.py tests/test_host.py tests/test_worker.py tests/test_image_generation.py
       - name: Fetch pinned engine sources
         run: uv run python scripts/fetch-engine-sources.py
-      - name: Build both inference engines
+      - name: Build text inference engine
         env:
           BACKEND: ${{ matrix.backend }}
-        run: |
-          uv run python scripts/build-runtime.py --engine llama.cpp --backend "$BACKEND" --jobs 3
-          uv run python scripts/build-runtime.py --engine stable-diffusion.cpp --backend "$BACKEND" --jobs 3
+        run: uv run python scripts/build-runtime.py --engine llama.cpp --backend "$BACKEND" --jobs 3
+      - name: Build image inference engine
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: uv run python scripts/build-runtime.py --engine stable-diffusion.cpp --backend "$BACKEND" --jobs 3
       - name: Package and check the standalone CLI
         shell: bash
         run: |
@@ -60,3 +62,33 @@ jobs:
           name: engrai-server-${{ matrix.target }}
           path: dist/cli/*
           if-no-files-found: error
+
+  linux-compatibility:
+    needs: bundle
+    # A macOS build failure must not skip checks of the Linux artifacts.
+    if: ${{ !cancelled() }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-x86_64-cpu
+          - runner: ubuntu-24.04-arm
+            target: linux-aarch64-cpu
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: engrai-server-${{ matrix.target }}
+          path: downloaded-bundle
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.18"
+      - name: Install test driver dependencies
+        run: uv sync --frozen --extra dev
+      - name: Install Ubuntu 22.04 bundle on Ubuntu 24.04 and preserve saved data on update
+        env:
+          ENGRAI_TEST_CLI_BUNDLE: downloaded-bundle/engrai-server-${{ matrix.target }}.tar.gz
+        run: uv run pytest tests/test_cli_installer.py -k real_bundle

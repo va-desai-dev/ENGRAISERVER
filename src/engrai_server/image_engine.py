@@ -113,6 +113,7 @@ class ImageControlPlane:
         self.client = httpx.AsyncClient(
             base_url=settings.image_engine_base_url,
             timeout=httpx.Timeout(30.0, read=None),
+            trust_env=False,  # Private loopback traffic must never use a host proxy.
         )
         self.generation_lock = asyncio.Lock()
         self.lifecycle_lock = asyncio.Lock()
@@ -285,9 +286,13 @@ class ImageControlPlane:
                 if await self._probe():
                     return
             except (httpx.HTTPError, ValueError) as exc:
-                last_error = str(exc)
+                last_error = f"{type(exc).__name__}: {exc}"
             await asyncio.sleep(0.75)
-        raise ImageEngineError(last_error)
+        tail = self._log_tail()
+        raise ImageEngineError(
+            f"Image worker readiness timed out at {self.settings.image_engine_base_url}: {last_error}"
+            + (f"\nWorker log:\n{tail}" if tail else "\nWorker log is empty.")
+        )
 
     async def _stop_owned_process(self) -> None:
         process = self.process
