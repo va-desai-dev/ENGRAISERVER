@@ -136,11 +136,22 @@ def test_verification_rejects_undeclared_payload(tmp_path: Path) -> None:
         verify_bundle(bundle)
 
 
-def test_verification_rejects_a_bundle_for_another_host(tmp_path: Path) -> None:
+@pytest.mark.parametrize("system,machine", [
+    ("Linux", "x86_64"),
+    ("Linux", "aarch64"),
+    ("Darwin", "x86_64"),
+    ("Darwin", "arm64"),
+])
+def test_verification_rejects_a_bundle_for_another_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, system: str, machine: str,
+) -> None:
+    monkeypatch.setattr(platform, "system", lambda: system)
+    monkeypatch.setattr(platform, "machine", lambda: machine)
     bundle = make_bundle(tmp_path)
+    verify_bundle(bundle)  # The normalized host architecture must be accepted.
     path = bundle / MANIFEST_NAME
     manifest = json.loads(path.read_text())
-    manifest["arch"] = "aarch64" if platform.machine().lower() != "aarch64" else "x86_64"
+    manifest["arch"] = "aarch64" if manifest["arch"] != "aarch64" else "x86_64"
     path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(RuntimeManagerError, match="this host"):
         verify_bundle(bundle)

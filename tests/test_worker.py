@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import socket
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,10 +18,9 @@ async def test_managed_worker_owns_llama_server_lifecycle(tmp_path: Path) -> Non
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
 
-    executable = tmp_path / "llama-server-fake"
-    executable.write_text(
-        """#!/usr/bin/python3
-import json
+    script = tmp_path / "llama server fake.py"
+    script.write_text(
+        """import json
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -47,7 +47,6 @@ HTTPServer((host, port), Handler).serve_forever()
 """,
         encoding="utf-8",
     )
-    executable.chmod(0o755)
     endpoint = WorkerEndpoint("127.0.0.1", port)
     state_path = tmp_path / "state" / "worker.json"
     worker = ManagedWorker(
@@ -56,26 +55,32 @@ HTTPServer((host, port), Handler).serve_forever()
         probe=LlamaCppProbe(),
         log_path=tmp_path / "state" / "worker.log",
         state_path=state_path,
-        load_timeout_seconds=5,
+        load_timeout_seconds=30,
         stop_timeout_seconds=2,
     )
     launch = LaunchSpec(
-        executable,
-        ("--host", endpoint.host, "--port", str(endpoint.port)),
+        Path(sys.executable),
+        (str(script), "--host", endpoint.host, "--port", str(endpoint.port)),
         {},
     )
 
-    await worker.start("example-local", launch)
-    status = await worker.status()
-    assert status["provider"] == "llama.cpp"
-    assert status["ready"] is True
-    assert status["owned"] is True
-    assert worker.state.phase == "ready"
-    assert worker.launch_log() == ""
-    assert json.loads(state_path.read_text())["deployment"] == "example-local"
-    assert state_path.stat().st_mode & 0o777 == 0o600
-
-    await worker.close()
+    # Use pytest's interpreter, not Apple's system Python or a PATH shim.
+    # Passing the script as an argument also handles paths containing spaces.
+    try:
+        try:
+            await worker.start("example-local", launch)
+        except WorkerError as exc:
+            pytest.fail(f"{exc}\nWorker log:\n{worker.launch_log() or '(empty)'}")
+        status = await worker.status()
+        assert status["provider"] == "llama.cpp"
+        assert status["ready"] is True
+        assert status["owned"] is True
+        assert worker.state.phase == "ready"
+        assert worker.launch_log() == ""
+        assert json.loads(state_path.read_text())["deployment"] == "example-local"
+        assert state_path.stat().st_mode & 0o777 == 0o600
+    finally:
+        await worker.close()
     assert worker.state.phase == "unloaded"
 
 
