@@ -80,3 +80,11 @@ def test_probe_devices_reports_binary_failure(tmp_path: Path) -> None:
 
     with pytest.raises(LlamaCppInventoryError, match="exited with 7: broken"):
         probe_devices(executable)
+
+
+def test_probe_timeout_preserves_worker_diagnostics(tmp_path: Path) -> None:
+    executable = tmp_path / "llama-server"
+    executable.write_text("#!/bin/sh\necho 'initializing Metal' >&2\nexec sleep 10\n")
+    executable.chmod(0o755)
+    with pytest.raises(LlamaCppInventoryError, match="(?s)timed out.*initializing Metal"):
+        probe_devices(executable, timeout=0.2)

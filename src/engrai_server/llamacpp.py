@@ -213,6 +213,8 @@ class LlamaCppControlPlane:
         self.background_kind: str | None = None
         self.background_target: str | None = None
         self.verified_runtime_path: str | None = None
+        self.device_lock = asyncio.Lock()
+        self.device_inventory: tuple[tuple[Path, int, int, int], tuple[LlamaCppDevice, ...]] | None = None
         self.capabilities: dict[str, dict[str, Any]] | None = None
         self.chat_template: tuple[tuple[str | None, int | None], str] | None = None
         self.state = self._read_state()
@@ -286,8 +288,16 @@ class LlamaCppControlPlane:
         try:
             status = await asyncio.to_thread(self._runtime_status)
             executable = Path(str(status["executable"]))
-            devices = await asyncio.to_thread(probe_devices, executable)
-        except (RuntimeManagerError, LlamaCppInventoryError) as exc:
+            async with self.device_lock:
+                stat = executable.stat()
+                key = (executable, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+                if self.device_inventory is None or self.device_inventory[0] != key:
+                    devices = await asyncio.to_thread(probe_devices, executable)
+                    self.device_inventory = (key, devices)
+                # Only identity and total memory inform launch planning. Free
+                # memory from this inventory is not live resource telemetry.
+                devices = self.device_inventory[1]
+        except (OSError, RuntimeManagerError, LlamaCppInventoryError) as exc:
             raise LlamaCppError(str(exc)) from exc
         self.verified_runtime_path = str(status["path"])
         return status, executable, devices

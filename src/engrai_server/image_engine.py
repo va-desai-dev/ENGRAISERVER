@@ -120,6 +120,7 @@ class ImageControlPlane:
         self.process: asyncio.subprocess.Process | None = None
         self.log_handle: BinaryIO | None = None
         self.sdcpp_devices: tuple[Path, tuple[SdCppDevice, ...]] | None = None
+        self.device_lock = asyncio.Lock()
         self.state = self._read_state()
         self.state.pid = None
         if self.state.phase not in {"stopped", "unloaded"}:
@@ -177,15 +178,16 @@ class ImageControlPlane:
         return Path(status["executable"]), str(status["version"])
 
     async def _sdcpp_devices(self, executable: Path) -> tuple[SdCppDevice, ...]:
-        if self.sdcpp_devices is None or self.sdcpp_devices[0] != executable:
-            try:
-                self.sdcpp_devices = (executable, await probe_devices(executable))
-            except (OSError, SdCppError) as exc:
-                raise ImageEngineError(str(exc)) from exc
-        return self.sdcpp_devices[1]
+        async with self.device_lock:
+            if self.sdcpp_devices is None or self.sdcpp_devices[0] != executable:
+                try:
+                    self.sdcpp_devices = (executable, await probe_devices(executable))
+                except (OSError, SdCppError) as exc:
+                    raise ImageEngineError(str(exc)) from exc
+            return self.sdcpp_devices[1]
 
     async def _launch_command(self, profile: ImageProfile, *, verify: bool = True) -> list[str]:
-        executable, _ = self._image_runtime(verify=verify)
+        executable, _ = await asyncio.to_thread(self._image_runtime, verify=verify)
         try:
             spec = compile_image_launch(
                 profile,
@@ -224,13 +226,22 @@ class ImageControlPlane:
     async def describe(self, profile: ImageProfile) -> dict[str, Any]:
         """Public profile view, with the launch command that would really run.
 
-        The command needs the runtime's device list, probed once and cached;
-        it is ``None`` when no image runtime is installed.
+        Status and profile reads never start a native device probe. The
+        command becomes available after a load has discovered the devices.
         """
 
         command = None
         with contextlib.suppress(ImageEngineError):
-            command = await self._launch_command(profile, verify=False)
+            executable, _ = self._image_runtime(verify=False)
+            if self.sdcpp_devices is not None and self.sdcpp_devices[0] == executable:
+                try:
+                    command = list(compile_image_launch(
+                        profile, executable, self.sdcpp_devices[1],
+                        host=self.settings.engine_host,
+                        port=self.settings.image_engine_port,
+                    ).command())
+                except SdCppError:
+                    pass
         return {**profile.public_dict(command), "engine": SDCPP}
 
     async def snapshot(self) -> dict[str, Any]:

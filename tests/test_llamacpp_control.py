@@ -1,9 +1,62 @@
+import asyncio
 from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
 
 from engrai_server.domain.deployments import DeploymentProfile
+from engrai_server.domain.store import DeploymentStore
 from engrai_server.engines.llamacpp import LlamaCppDevice, parse_device_list
-from engrai_server.llamacpp import effective_cache_capabilities, plan_deployment
+from engrai_server.llamacpp import LlamaCppControlPlane, LlamaCppError, effective_cache_capabilities, plan_deployment
+from engrai_server.engines.llamacpp import LlamaCppInventoryError
 from engrai_server.profiles import ProfileStore
+from engrai_server.settings import Settings
+
+
+@pytest.mark.asyncio
+async def test_device_inventory_is_shared_and_invalidated_when_worker_changes(tmp_path, monkeypatch):
+    executable = tmp_path / "worker"
+    executable.write_bytes(b"worker version one")
+    control = LlamaCppControlPlane(
+        Settings(model_state_path=tmp_path / "state.json"),
+        ProfileStore(tmp_path / "routes", [tmp_path]),
+        DeploymentStore(tmp_path / "deployments"),
+    )
+    status = Mock(return_value={"executable": str(executable), "path": str(tmp_path)})
+    inventory = Mock(return_value=(LlamaCppDevice("MTL0", "metal", 0, "Apple", 16384, 8000),))
+    monkeypatch.setattr(control, "_runtime_status", status)
+    monkeypatch.setattr("engrai_server.llamacpp.probe_devices", inventory)
+    try:
+        results = await asyncio.gather(*(control._components() for _ in range(4)))
+        assert inventory.call_count == 1
+        assert status.call_count == 4  # Cached devices never bypass runtime verification.
+        assert all(result[2] == inventory.return_value for result in results)
+        executable.write_bytes(b"replacement worker with a different size")
+        await control._components()
+        assert inventory.call_count == 2
+    finally:
+        await control.worker.client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_failed_device_discovery_can_be_retried(tmp_path, monkeypatch):
+    executable = tmp_path / "worker"
+    executable.write_bytes(b"worker")
+    control = LlamaCppControlPlane(
+        Settings(model_state_path=tmp_path / "state.json"),
+        ProfileStore(tmp_path / "routes", [tmp_path]),
+        DeploymentStore(tmp_path / "deployments"),
+    )
+    monkeypatch.setattr(control, "_runtime_status", lambda: {"executable": str(executable), "path": str(tmp_path)})
+    inventory = Mock(side_effect=[LlamaCppInventoryError("probe timed out"), ()])
+    monkeypatch.setattr("engrai_server.llamacpp.probe_devices", inventory)
+    try:
+        with pytest.raises(LlamaCppError, match="probe timed out"):
+            await control._components()
+        assert (await control._components())[2] == ()
+        assert inventory.call_count == 2
+    finally:
+        await control.worker.client.aclose()
 
 
 def unresolved_deployment() -> DeploymentProfile:

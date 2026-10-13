@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -142,6 +144,63 @@ async def test_image_lane_launches_the_installed_image_runtime(tmp_path: Path) -
     assert described["engine"] == SDCPP
     assert described["command"].startswith(command[0])
     await control.client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_image_status_never_launches_device_probes(tmp_path: Path, monkeypatch) -> None:
+    store, _ = image_profile(tmp_path)
+    runtime_root = install_fake_image_runtime(tmp_path / "runtimes", tmp_path)
+    control = ImageControlPlane(image_settings(tmp_path, runtime_root), store)
+    probe = AsyncMock(side_effect=AssertionError("status must not start device discovery"))
+    monkeypatch.setattr("engrai_server.image_engine.probe_devices", probe)
+    monkeypatch.setattr(control, "engine_status", AsyncMock(return_value={"owned": False}))
+    try:
+        snapshots = await asyncio.gather(*(control.snapshot() for _ in range(4)))
+        assert all(snapshot["image_models"][0]["command"] is None for snapshot in snapshots)
+        probe.assert_not_awaited()
+    finally:
+        await control.client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_image_launch_plans_share_device_discovery(tmp_path: Path, monkeypatch) -> None:
+    store, profile = image_profile(tmp_path)
+    runtime_root = install_fake_image_runtime(tmp_path / "runtimes", tmp_path)
+    control = ImageControlPlane(image_settings(tmp_path, runtime_root), store)
+
+    async def discover(executable):
+        await asyncio.sleep(0)
+        return DEVICES
+
+    probe = AsyncMock(side_effect=discover)
+    monkeypatch.setattr("engrai_server.image_engine.probe_devices", probe)
+    try:
+        commands = await asyncio.gather(*(control._launch_command(profile) for _ in range(4)))
+        probe.assert_awaited_once()
+        assert all(command == commands[0] for command in commands)
+    finally:
+        await control.client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_image_device_probe_kills_and_reaps_process(monkeypatch) -> None:
+    from engrai_server.engines.sdcpp import probe_devices
+
+    started = asyncio.Event()
+
+    async def communicate():
+        started.set()
+        await asyncio.Event().wait()
+
+    process = Mock(communicate=AsyncMock(side_effect=communicate), wait=AsyncMock())
+    monkeypatch.setattr("asyncio.create_subprocess_exec", AsyncMock(return_value=process))
+    task = asyncio.create_task(probe_devices(Path("/worker")))
+    await asyncio.wait_for(started.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    process.kill.assert_called_once()
+    process.wait.assert_awaited_once()
 
 
 @pytest.mark.asyncio

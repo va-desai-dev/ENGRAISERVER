@@ -9,6 +9,7 @@ always resolves against this exact runtime build and host.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ipaddress
 import re
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..protocol import LaunchSpec
-from ..worker import ProbeResult
+from ..worker import ProbeResult, native_worker_environment
 
 if TYPE_CHECKING:
     from ...image_profiles import ImageProfile
@@ -61,12 +62,16 @@ async def probe_devices(executable: Path, timeout: float = 30.0) -> tuple[SdCppD
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
+        env=native_worker_environment(),
     )
     try:
         output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
-    except TimeoutError as exc:
-        process.kill()
+    except (TimeoutError, asyncio.CancelledError) as exc:
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
         await process.wait()
+        if isinstance(exc, asyncio.CancelledError):
+            raise
         raise SdCppError("image runtime did not list its devices in time") from exc
     if process.returncode:
         raise SdCppError(

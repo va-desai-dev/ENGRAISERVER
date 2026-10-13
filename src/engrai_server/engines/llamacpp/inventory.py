@@ -7,6 +7,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..worker import native_worker_environment
+
 
 _DEVICE = re.compile(
     r"^\s*(?P<id>(?P<backend>CUDA|ROCm|MTL|Metal|Vulkan)(?P<index>\d+)):\s+"
@@ -69,7 +71,16 @@ def probe_devices(executable: Path, *, timeout: float = 15.0) -> tuple[LlamaCppD
             text=True,
             timeout=timeout,
             check=False,
+            env=native_worker_environment(),
         )
+    except subprocess.TimeoutExpired as exc:
+        parts = [part.decode("utf-8", errors="replace") if isinstance(part, bytes) else part
+                 for part in (exc.stdout, exc.stderr) if part]
+        detail = "\n".join(parts).strip()[-3000:]
+        raise LlamaCppInventoryError(
+            f"text runtime device discovery timed out after {timeout:g} seconds"
+            + (f". Worker output:\n{detail}" if detail else ". The worker produced no diagnostic output.")
+        ) from exc
     except (OSError, subprocess.SubprocessError) as exc:
         raise LlamaCppInventoryError(f"could not inspect llama-server devices: {exc}") from exc
     output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
