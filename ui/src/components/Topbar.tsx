@@ -4,8 +4,8 @@ import { summarise } from "../lib/engine";
 import { useStore } from "../store/useStore";
 
 export function Topbar({
-  onAccount, onEngine,
-}: { onAccount: () => void; onEngine: () => void }) {
+  onAccount, onEngine, onLedger,
+}: { onAccount: () => void; onEngine: () => void; onLedger: () => void }) {
   const snapshot = useStore((s) => s.snapshot);
   const profile = useStore((s) => s.profile);
   const offline = useStore((s) => s.offline);
@@ -32,6 +32,19 @@ export function Topbar({
           </svg>
           <span>Card Studio</span>
         </a>
+        <button
+          className="studio-link"
+          type="button"
+          onClick={onLedger}
+          data-testid="open-ledger"
+          title="Ledger: what the models know about you"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z" />
+            <path d="M5 17a3 3 0 0 1 3-3h11M9 8h6" />
+          </svg>
+          <span>Ledger</span>
+        </button>
         <button className="engine-pill" type="button" onClick={onEngine} aria-label={engineLabel} title={engineLabel}>
           <StatusDot tone={offline ? "bad" : engine.tone} pulse={!offline && engine.pulse} />
           <span>{offline ? "Engine unavailable" : `Engine ${engine.label === "Live" ? "Live" : engine.label}`}</span>

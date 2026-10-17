@@ -54,8 +54,8 @@ POLICIES: dict[str, RuntimePolicy] = {
         kernel={
             "name": "llama.cpp",
             "repository": "https://github.com/ggml-org/llama.cpp.git",
-            "tag": "v0.5.0",
-            "commit": "7fe450e19305b828c199d602c23a8337aaa1f03b",
+            "tag": "master-fcac190",
+            "commit": "fcac19079f3f2985fe74ed845f0880e7e9a8030a",
             "license": "MIT",
         },
         required_options=frozenset(

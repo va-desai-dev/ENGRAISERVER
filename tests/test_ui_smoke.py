@@ -62,6 +62,9 @@ def base_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         "ENGRAI_TEXT_ENGINE_LOG": str(tmp / "text-worker.log"),
         "MODEL_STATE_PATH": str(tmp / "runtime.json"),
         "ENGRAI_TEXT_ENGINE_PORT": str(free_port()),
+        # The ledger is the owner's own data; a smoke test must never write to
+        # the real one.
+        "ENGRAI_LEDGER_DATA_DIR": str(tmp / "ledger"),
     }
     process = subprocess.Popen(
         ["uv", "run", "uvicorn", "engrai_server.main:app", "--host", "127.0.0.1", "--port", str(port)],
@@ -106,6 +109,7 @@ def unconfigured_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             "ENGRAI_TEXT_ENGINE_LOG": str(tmp / "text-worker.log"),
             "MODEL_STATE_PATH": str(tmp / "runtime.json"),
             "ENGRAI_TEXT_ENGINE_PORT": str(free_port()),
+            "ENGRAI_LEDGER_DATA_DIR": str(tmp / "ledger"),
         }
     )
     process = subprocess.Popen(
@@ -589,6 +593,55 @@ def test_every_touch_target_meets_the_minimum(page: Page) -> None:
              .filter(Boolean)"""
     )
     assert not undersized, f"touch targets under 44px: {undersized}"
+
+
+# ── Ledger ────────────────────────────────────────────────────────────────
+
+
+def open_ledger(page: Page) -> None:
+    sign_in(page)
+    page.get_by_test_id("open-ledger").click()
+    page.wait_for_selector('[data-testid="ledger-entries"]', timeout=10000)
+
+
+def test_a_ledger_entry_can_be_written_and_is_listed_in_date_order(page: Page) -> None:
+    open_ledger(page)
+    for title, when in (("Ran a marathon", "2023-05-07"), ("Built a telescope", "2011")):
+        page.get_by_test_id("ledger-new").click()
+        page.get_by_test_id("ledger-title").fill(title)
+        page.get_by_test_id("ledger-when").fill(when)
+        page.get_by_test_id("ledger-content").fill(f"{title}, written by the smoke test.")
+        page.get_by_test_id("ledger-save").click()
+        page.wait_for_selector('[data-testid="ledger-editor"]', state="detached", timeout=10000)
+
+    titles = page.locator(".ledger-entries .key-label").all_text_contents()
+    assert titles == ["Built a telescope", "Ran a marathon"]
+
+    # Closing and reopening reads it back from the gateway, not from state.
+    page.locator('.sheet[role="dialog"] .icon-button').click()
+    page.get_by_test_id("open-ledger").click()
+    page.wait_for_selector(".ledger-entries li:nth-child(2)")
+
+
+def test_a_malformed_ledger_date_is_explained_in_place(page: Page) -> None:
+    open_ledger(page)
+    page.get_by_test_id("ledger-new").click()
+    page.get_by_test_id("ledger-title").fill("Vague")
+    page.get_by_test_id("ledger-when").fill("last spring")
+    page.get_by_test_id("ledger-content").fill("No real date.")
+    page.get_by_test_id("ledger-save").click()
+
+    page.wait_for_selector('[data-testid="ledger-editor"] .error-note', timeout=10000)
+    assert "dates look like" in (page.text_content('[data-testid="ledger-editor"] .error-note') or "")
+
+
+def test_ledger_sheet_fits_a_phone(page: Page) -> None:
+    page.set_viewport_size({"width": 390, "height": 844})
+    open_ledger(page)
+    page.wait_for_selector('[data-testid="ledger-settings"]')
+    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+    sheet = page.locator('.sheet[role="dialog"]').bounding_box()
+    assert sheet and sheet["x"] >= 0 and sheet["x"] + sheet["width"] <= 390
 
 
 # ── Account panel ─────────────────────────────────────────────────────────

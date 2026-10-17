@@ -274,7 +274,10 @@ def create_cardgen(
         return json.dumps(payload).encode("utf-8")
 
     async def open_text(raw: bytes) -> tuple[httpx.Response, AsyncIterator[bytes]]:
-        return await control.forward_openai("POST", "chat/completions", raw, "", "application/json")
+        # Authoring prompts are about a character, never about the owner.
+        return await control.forward_openai(
+            "POST", "chat/completions", raw, "", "application/json", ledger=False
+        )
 
     def text_failure(exc: Exception) -> JSONResponse:
         if isinstance(exc, EngineNotReady):

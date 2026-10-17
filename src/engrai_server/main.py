@@ -37,6 +37,7 @@ from .image_profiles import ImageProfileStore
 from .identity import PRODUCT_NAME
 from .llamacpp import LlamaCppControlPlane, LlamaCppError
 from .metrics import MetricsCollector
+from .ledger import Ledger, create_ledger
 from .model_browser import ModelBrowser
 from .model_downloads import (
     DownloadBusyError,
@@ -68,7 +69,8 @@ preferences = PreferenceStore(
 )
 profiles = ProfileStore(settings.route_dir, preferences.search_roots)
 deployments = DeploymentStore(settings.deployment_dir)
-control = LlamaCppControlPlane(settings, profiles, deployments)
+ledger = Ledger(settings, events=events)
+control = LlamaCppControlPlane(settings, profiles, deployments, ledger)
 image_profiles = ImageProfileStore(
     settings.image_command_dir, preferences.search_roots
 )
@@ -91,7 +93,9 @@ async def lifespan(_: FastAPI):
     # new epoch when the gateway has been restarted underneath it.
     events.record("gateway.started", "Gateway started")
     yield
-    await asyncio.gather(control.close(), images.close(), model_downloads.close())
+    await asyncio.gather(
+        control.close(), images.close(), model_downloads.close(), ledger.close()
+    )
 
 
 app = FastAPI(
@@ -144,6 +148,8 @@ create_cardgen(
     images=images,
     data_dir=settings.cardgen_data_dir,
 )(app)
+
+create_ledger(ledger=ledger, require_admin=require_admin)(app)
 
 
 # Every GET route reachable without credentials also answers HEAD. RFC 9110

@@ -210,6 +210,9 @@ class ProfileStore:
                     kind = "draft"
                 elif "flux" in lower:
                     kind = "image"
+                elif "embed" in lower:
+                    # Encoders for the ledger's index; they cannot serve chat.
+                    kind = "embedding"
                 else:
                     kind = "text"
                 discovered[str(path)] = {

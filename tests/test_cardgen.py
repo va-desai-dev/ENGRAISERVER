@@ -93,7 +93,9 @@ def fake_engine(module, frames: list[bytes], *, content_type: str = "text/event-
     """Stand in for the text engine, recording what Card Studio asked it for."""
     seen: list[dict] = []
 
-    async def forward(method, path, body, query, ctype):
+    async def forward(method, path, body, query, ctype, *, ledger=True):
+        # Authoring prompts must never carry the owner's ledger.
+        assert ledger is False
         seen.append({"method": method, "path": path, "body": json.loads(body)})
 
         async def stream() -> AsyncIterator[bytes]:
@@ -249,7 +251,7 @@ def test_resumable_text_reports_engine_failure_to_the_job(studio) -> None:
     client, module, _ = studio
     load_text(module)
 
-    async def broken(*_args):
+    async def broken(*_args, **_options):
         raise httpx.ConnectError("worker gone")
 
     module.control.forward_openai = broken

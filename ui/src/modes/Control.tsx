@@ -15,6 +15,7 @@ import { ProfileEditor } from "../components/ProfileEditor";
 import { ImageProfileEditor } from "../components/ImageProfileEditor";
 import { ImageModelCard } from "../components/ImageModelCard";
 import { Account } from "../components/Account";
+import { Ledger } from "../components/Ledger";
 import { ModelPuller } from "../components/ModelPuller";
 import { Button, Empty, StatusDot } from "../components/primitives";
 
@@ -32,12 +33,13 @@ export function Control() {
   const [editingImage, setEditingImage] = useState<string | null>(null);
   const [account, setAccount] = useState(false);
   const [engineSheet, setEngineSheet] = useState(false);
+  const [ledger, setLedger] = useState(false);
 
   /* Reloading the page out from under someone editing a deployment in the
      editor would be its own bug, so the upgrade waits for a quiet moment.
      Closing the last sheet makes this true and the check fires again. */
   const idle =
-    editing === null && editingImage === null && !account && !engineSheet &&
+    editing === null && editingImage === null && !account && !engineSheet && !ledger &&
     busyModel === null && busyImage === null;
   const version = useVersionCheck({ autoReload: idle });
 
@@ -52,7 +54,11 @@ export function Control() {
 
   return (
     <div className="shell">
-      <Topbar onAccount={() => setAccount(true)} onEngine={() => setEngineSheet(true)} />
+      <Topbar
+        onAccount={() => setAccount(true)}
+        onEngine={() => setEngineSheet(true)}
+        onLedger={() => setLedger(true)}
+      />
 
       {version.stale && (
         <div className="update-bar" role="status">
@@ -173,6 +179,7 @@ export function Control() {
         onClose={() => setEditingImage(null)}
       />
       <Account open={account} onClose={() => setAccount(false)} />
+      <Ledger open={ledger} onClose={() => setLedger(false)} />
 
       <Sheet
         open={engineSheet}

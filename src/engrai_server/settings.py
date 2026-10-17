@@ -187,6 +187,22 @@ class Settings(BaseSettings):
         default_factory=lambda: _data_path("cardgen"),
         validation_alias=AliasChoices("ENGRAI_CARDGEN_DATA_DIR", "CARDGEN_DATA_DIR"),
     )
+    # The ledger: hand-written facts about the gateway's owner. User-authored
+    # like the card library, so it lives under XDG data and belongs in backups.
+    ledger_data_dir: Path = Field(
+        default_factory=lambda: _data_path("ledger"),
+        validation_alias=AliasChoices("ENGRAI_LEDGER_DATA_DIR", "LEDGER_DATA_DIR"),
+    )
+    # A third loopback-only worker: llama-server in embedding mode, which
+    # indexes the ledger without touching the chat lane or its KV cache.
+    embedding_engine_port: int = Field(
+        5004,
+        validation_alias=AliasChoices("ENGRAI_EMBEDDING_ENGINE_PORT", "EMBEDDING_ENGINE_PORT"),
+    )
+    embedding_engine_log_path: Path = Field(
+        default_factory=lambda: _state_path("embedding-worker.log"),
+        validation_alias=AliasChoices("ENGRAI_EMBEDDING_ENGINE_LOG", "EMBEDDING_ENGINE_LOG"),
+    )
     image_state_path: Path = Field(default_factory=lambda: _state_path("image-runtime.json"))
     image_result_dir: Path = Field(default_factory=lambda: _state_path("image-results"))
     image_result_ttl_seconds: int = Field(
@@ -223,6 +239,7 @@ class Settings(BaseSettings):
         "text_engine_log_path",
         "image_command_dir",
         "image_engine_log_path",
+        "embedding_engine_log_path",
         "model_state_path",
         "image_state_path",
         "image_result_dir",
@@ -295,6 +312,12 @@ class Settings(BaseSettings):
             self.deployment_dir = self.route_dir.parent / "deployments"
         if "image_engine_port" not in supplied and "text_engine_port" in supplied:
             self.image_engine_port = self.text_engine_port + 1
+        if "embedding_engine_port" not in supplied and "text_engine_port" in supplied:
+            self.embedding_engine_port = self.text_engine_port + 2
+        if "embedding_engine_log_path" not in supplied and "text_engine_log_path" in supplied:
+            self.embedding_engine_log_path = (
+                self.text_engine_log_path.parent / "embedding-worker.log"
+            )
         if "image_command_dir" not in supplied and "route_dir" in supplied:
             self.image_command_dir = self.route_dir.parent / "image-commands"
         if "image_engine_log_path" not in supplied and "text_engine_log_path" in supplied:

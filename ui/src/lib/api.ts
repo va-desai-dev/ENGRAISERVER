@@ -1,5 +1,6 @@
 import type {
-  ApiKey, DiscoveredImageFile, DiscoveredModel, ImageModelProfile, Library, Metrics, ModelProfile,
+  ApiKey, DiscoveredImageFile, DiscoveredModel, ImageModelProfile, LedgerEntry, LedgerPreview,
+  LedgerSettings, LedgerState, Library, Metrics, ModelProfile,
   ModelPullBody, ModelPullPreview, ModelPullStatus, ModelPullTask, HubModel, HubVariants,
   PreflightReport, Profile, Session, Snapshot,
 } from "./types";
@@ -205,6 +206,23 @@ export const api = {
     request<{ task: ModelPullTask }>(
       "DELETE", `/control/model-pulls/${encodeURIComponent(id)}`,
     ),
+
+  /* Ledger. */
+  ledger: () => request<LedgerState>("GET", "/control/ledger"),
+  saveLedgerSettings: (settings: LedgerSettings) =>
+    request<LedgerState & { ok: boolean }>("PUT", "/control/ledger/settings", settings),
+  saveLedgerEntry: (entry: LedgerEntry) =>
+    request<LedgerState & { ok: boolean; entry: LedgerEntry }>(
+      "POST", "/control/ledger/entries", entry,
+    ),
+  removeLedgerEntry: (id: string) =>
+    request<LedgerState & { ok: boolean }>(
+      "DELETE", `/control/ledger/entries/${encodeURIComponent(id)}`,
+    ),
+  reindexLedger: (force: boolean) =>
+    request<LedgerState & { ok: boolean }>("POST", "/control/ledger/reindex", { force }),
+  previewLedger: (text: string) =>
+    request<LedgerPreview>("POST", "/control/ledger/preview", { text }),
 
   /* Wall display. */
   displayTokens: () =>

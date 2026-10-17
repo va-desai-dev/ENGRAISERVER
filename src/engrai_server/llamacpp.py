@@ -14,7 +14,7 @@ import time
 from collections.abc import AsyncIterator, Coroutine
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import jinja2
@@ -37,6 +37,9 @@ from .engines.worker import ManagedWorker, WorkerEndpoint, WorkerError
 from .profiles import RouteProfile, ProfileStore
 from .runtime import RuntimeManagerError, inspect_runtime
 from .settings import Settings
+
+if TYPE_CHECKING:
+    from .ledger import Ledger
 
 
 class LlamaCppError(RuntimeError):
@@ -189,10 +192,12 @@ class LlamaCppControlPlane:
         settings: Settings,
         profiles: ProfileStore,
         deployments: DeploymentStore,
+        ledger: Ledger | None = None,
     ) -> None:
         self.settings = settings
         self.profiles = profiles
         self.deployments = deployments
+        self.ledger = ledger
         self.endpoint = WorkerEndpoint(
             settings.engine_host, settings.text_engine_port
         )
@@ -535,7 +540,15 @@ class LlamaCppControlPlane:
         raw_body: bytes,
         query: str,
         content_type: str | None,
+        *,
+        ledger: bool = True,
     ) -> tuple[httpx.Response, AsyncIterator[bytes]]:
+        """Route one OpenAI-compatible request to the worker.
+
+        ``ledger`` lets an internal caller that writes its own prompts, such
+        as Card Studio, keep the owner's ledger out of them.
+        """
+
         await self.generation_lock.acquire()
         try:
             body = raw_body
@@ -546,11 +559,18 @@ class LlamaCppControlPlane:
                     profile = self.profiles.resolve(str(requested))
                     await self.ensure_model(profile)
                     payload["model"] = profile.id
-                    if (
-                        method.upper() == "POST"
-                        and path.strip("/") == "chat/completions"
-                        and chat.supports(payload)
-                    ):
+                    is_chat = method.upper() == "POST" and path.strip("/") == "chat/completions"
+                    if is_chat and ledger and self.ledger is not None:
+                        # Before the branch below, so the gateway render and
+                        # the native tool and multimodal handler both get it.
+                        policy = profile.prompt
+                        await self.ledger.augment(
+                            profile.id,
+                            payload,
+                            rendered=chat.supports(payload)
+                            and not (policy is not None and policy.template == "none"),
+                        )
+                    if is_chat and chat.supports(payload):
                         rendered = await self._rendered_chat(profile, payload)
                         if rendered is not None:
                             return await self._generate_chat(payload, rendered)

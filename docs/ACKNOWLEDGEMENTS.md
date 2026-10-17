@@ -1,18 +1,16 @@
-# Third-party software
+# Third-Party Notices
+ENGRAISERVER values collaboration and transparency. It also values integrity and provenance to ensure fair authorship credit. Accordingly, the following documentation outlines all acknowledgments, third-party frameworks, libraries, and derivative provenance used by ENGRAISERVER. 
 
-ENGRAI SERVER builds its runtimes from pinned upstream sources. The exact tag,
-commit, build options, and payload checksums are recorded in each runtime
-bundle, and the upstream license texts are distributed inside every bundle
-under `licenses/`.
-
-| Runtime | Upstream | License |
+## Derivative Provenance
+ENGRAISERVER builds its runtimes from pinned upstream sources. The exact tag, commit, build options, and payload checksums are recorded in each runtime bundle, and the upstream license texts are distributed inside every bundle under `licenses/`.
+| Service | Upstream | License |
 | --- | --- | --- |
 | `engrai-text` | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) | MIT |
 | `engrai-image` | [leejet/stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) | MIT |
+|`card-studio`| [(c) 2025 Tremontaine](https://github.com/zebede1980/CardGenV2) | MIT |
 
-Both runtimes also compile in libraries their upstreams vendor. Every one of
-their license texts ships in the bundle's `licenses/` directory:
-
+## Upstream Frameworks
+Existing frameworks also include libraries from their upstream vendors. Each license text ships in the bundle’s `licenses/` directory:
 | Library | License | Runtime |
 | --- | --- | --- |
 | [ggml](https://github.com/ggml-org/ggml) (stable-diffusion.cpp uses [a patched fork](https://github.com/leejet/ggml)) | MIT | text, image |
@@ -29,19 +27,3 @@ their license texts ships in the bundle's `licenses/` directory:
 | [oniguruma](https://github.com/kkos/oniguruma) | BSD-2-Clause | image |
 | [utf8proc](https://github.com/JuliaStrings/utf8proc) | MIT | image |
 | [darts-clone](https://github.com/s-yata/darts-clone) | BSD-2-Clause | image |
-
-Where a library keeps its license inside a header (or not in the vendored tree
-at all), the notice is kept verbatim in `runtime/notices/<engine>/`, and the
-build refuses to run if the pinned source no longer matches it.
-
-Card Studio (`src/engrai_server/cardgen/`) is adapted from CardGen V2,
-copyright (c) 2025 Tremontaine, MIT licensed. Its license text ships beside
-the app as `src/engrai_server/cardgen/web/LICENSE`. ENGRAI replaced its Node
-server, accounts and provider integrations with the gateway's own.
-
-The gateway's Python dependencies, including
-[Jinja](https://github.com/pallets/jinja) (BSD-3-Clause) for chat template
-rendering, are installed from PyPI under their own licenses.
-
-This notice describes provenance; it is not legal advice and does not replace
-the license texts distributed by upstream projects.

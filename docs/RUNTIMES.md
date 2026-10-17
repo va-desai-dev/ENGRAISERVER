@@ -169,13 +169,53 @@ local values, then persists the resolved plan before serving requests.
 ### Gemma 4 qualification note
 
 Gemma 4 combines global and sliding-window attention. With the pinned
-llama.cpp v0.5.0 worker, KV shifting and chunk-level `cache_reuse` are not
-available for this context, but the persistent server slot still performs
-exact longest-common-prefix reuse. A two-turn qualification retained all 2,716
-tokens from the first prompt and evaluated only the 16 appended tokens on the
-second request. This is the behavior required by an append-only chat client;
-editing earlier turns or crossing the hard context boundary requires an
-explicit ENGRAI history policy and may trigger full prefill.
+llama.cpp worker (`master-fcac190`), KV shifting and chunk-level `cache_reuse`
+are not available for this context, but the persistent server slot still
+performs exact longest-common-prefix reuse. A two-turn qualification on a 31B
+Gemma 4 route retained 6,610 of the first prompt's 6,614 tokens and evaluated
+only the 20 appended tokens on the second request. This is the behavior
+required by an append-only chat client; editing earlier turns or crossing the
+hard context boundary requires an explicit ENGRAI history policy and may
+trigger full prefill.
+
+## Moving the pin
+
+The pin is ENGRAI's to move. Upstream ships model support continuously and
+tags releases rarely, so the lock may name any commit on upstream `master`;
+`tag` is then `master-<short commit>` and `runtime_version` ends in the same
+short commit. Moving it is a source change, reviewed like any other:
+
+1. Set `kernel.commit`, `kernel.tag` and `runtime_version` in
+   `runtime/llama.cpp.lock.json`, and the same `kernel` in `POLICIES` in
+   `src/engrai_server/runtime.py`. A test keeps the two equal, and an installed
+   gateway refuses bundles built from any other commit.
+2. Fetch the source and confirm the build still honours ENGRAI's switches.
+   Every option in `LLAMA_OWNED_OPTIONS` (`scripts/build-runtime.py`) must
+   still be declared by upstream's CMake files; a renamed or removed option
+   would otherwise be silently ignored and, for example, ship the upstream UI.
+3. Build. The build fails before compiling if a bundled license file is gone
+   or a notice in `runtime/notices/` no longer matches the source.
+4. Compare `--help` between the old and new worker for every flag the adapter
+   emits (`engines/llamacpp/adapter.py`) and the embedding worker passes
+   (`ledger/embedder.py`). Add newly introduced flags to
+   `_CONTROLLED_ARGUMENTS` when ENGRAI should own them.
+5. Confirm `--list-devices` still prints records `inventory.py` parses.
+6. Qualify on a real route: load, a two-turn prefix-cache check, an assistant
+   prefill, streaming with reasoning, a tool call through the native handler,
+   and ledger recall with the embedding worker.
+
+What the move from `v0.5.0` to `master-fcac190` needed, per backend:
+
+| Backend | Upstream build changes | ENGRAI changes | Checked by |
+| --- | --- | --- | --- |
+| CUDA | `GGML_CUDA_CUB_3DOT2` became `GGML_CUDA_CCCL_VERSION` (neither is set by ENGRAI) | none | built and qualified on two GPUs |
+| CPU | none | none | built |
+| Metal | flash-attention kernels split into per-type `.metal` files, embedded by upstream's own build | none | source inspection only |
+| Vulkan | `ggml-vulkan/CMakeLists.txt` unchanged | none | source inspection only |
+| ROCm | `GGML_HIP` unchanged | none | source inspection only |
+
+The worker's command line gained `--moe-cache-mib` and `--spec-draft-sampling`
+and lost nothing; its default port changed, which ENGRAI never relies on.
 
 ## Qualification gate
 

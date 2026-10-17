@@ -298,3 +298,59 @@ export interface DisplaySnapshot {
   route_count: number;
   metrics: Metrics;
 }
+
+/* ── Ledger ──────────────────────────────────────────────────────────────── */
+
+export interface LedgerEntry {
+  id?: string | null;
+  title: string;
+  content: string;
+  /** Partial ISO date: 2019, 2019-06 or 2019-06-14. Null for undated facts. */
+  when: string | null;
+  until: string | null;
+  /** Sent on every request; everything else is recalled by similarity. */
+  pinned: boolean;
+  enabled: boolean;
+  tags: string[];
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface LedgerSettings {
+  subject_name: string;
+  enabled_routes: string[];
+  embedding_model_path: string;
+  embedding_gpu_layers: number;
+  query_prefix: string;
+  document_prefix: string;
+  top_k: number;
+  min_score: number;
+  recall_budget_tokens: number;
+  recall_placement: "system" | "user";
+}
+
+export interface LedgerStatus {
+  entries: number;
+  pinned: number;
+  episodes: number;
+  pinned_tokens: number;
+  indexed: number;
+  unindexed: number;
+  dimension: number;
+  indexing: boolean;
+  error: string | null;
+  worker: { running: boolean; model: string | null; error: string | null };
+}
+
+export interface LedgerState {
+  settings: LedgerSettings;
+  entries: LedgerEntry[];
+  status: LedgerStatus;
+}
+
+export interface LedgerPreview {
+  pinned_block: string;
+  recalled_block: string;
+  recalled: { id: string; title: string; when: string | null; score: number }[];
+  error: string | null;
+}
