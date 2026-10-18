@@ -101,7 +101,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=PRODUCT_NAME,
     description="Sovereign host control plane and runtime orchestrator",
-    version="0.1.0",
+    version="0.1.1",
     docs_url=None,
     redoc_url=None,
     lifespan=lifespan,
