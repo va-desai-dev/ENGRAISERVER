@@ -27,6 +27,21 @@ export class ApiError extends Error {
 
 type Method = "GET" | "POST" | "PUT" | "DELETE";
 
+export interface SymLinkPeer {
+  id: string;
+  label: string;
+  public_key: string;
+  created_at: number;
+  permissions: string[];
+}
+
+export interface SymLinkInvitation {
+  invitation_id: string;
+  expires_at: number;
+  uri: string;
+  qr: string;
+}
+
 /** Supplied by the store so the client never owns session state. */
 let readToken: () => string | null = () => null;
 export function bindToken(reader: () => string | null) {
@@ -87,6 +102,16 @@ async function request<T>(
 }
 
 export const api = {
+  symlink: () => request<{
+    version: number; server_key: string; peers: SymLinkPeer[];
+    invitations: { id: string; expires_at: number }[];
+  }>("GET", "/control/symlink"),
+  createSymLinkInvitation: (label: string, origin: string) =>
+    request<SymLinkInvitation>("POST", "/control/symlink/invitations", { label, origin }),
+  cancelSymLinkInvitation: (id: string) =>
+    request<{ ok: boolean }>("DELETE", `/control/symlink/invitations/${encodeURIComponent(id)}`),
+  revokeSymLinkPeer: (id: string) =>
+    request<{ peers: SymLinkPeer[] }>("DELETE", `/control/symlink/peers/${encodeURIComponent(id)}`),
   /* Unauthenticated. */
   status: () => request<{ initialized: boolean }>("GET", "/control/status"),
   setup: (body: { name: string; email: string; password: string }) =>

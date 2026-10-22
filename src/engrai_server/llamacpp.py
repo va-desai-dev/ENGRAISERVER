@@ -589,7 +589,9 @@ class LlamaCppControlPlane:
                     self.generation_lock.release()
 
             return response, stream()
-        except Exception:
+        except BaseException:
+            # A disconnected SymLink peer cancels requests while model loading
+            # or waiting for response headers, before a stream owns this lock.
             if self.generation_lock.locked():
                 self.generation_lock.release()
             raise

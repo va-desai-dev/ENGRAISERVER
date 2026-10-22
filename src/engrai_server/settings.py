@@ -137,6 +137,9 @@ class Settings(BaseSettings):
         default_factory=lambda: _state_path("credentials.json"),
         validation_alias=AliasChoices("ENGRAI_CREDENTIALS_PATH", "CREDENTIALS_PATH"),
     )
+    symlink_state_path: Path | None = Field(
+        None, validation_alias="ENGRAI_SYMLINK_STATE_PATH",
+    )
     preferences_path: Path = Field(
         default_factory=lambda: _state_path("preferences.json"),
         validation_alias=AliasChoices("ENGRAI_PREFERENCES_PATH", "PREFERENCES_PATH"),

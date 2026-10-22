@@ -654,6 +654,28 @@ def test_avatar_opens_the_account_panel(page: Page) -> None:
     page.wait_for_selector(".check-list li")
 
 
+def test_symlink_qr_is_local_and_closing_cancels_invitation(page: Page) -> None:
+    from playwright.sync_api import expect
+
+    open_account(page)
+    panel = page.get_by_test_id("symlink")
+    panel.get_by_label("SymLink device name").fill("My iPhone")
+    panel.get_by_label("SymLink server address").fill("https://paired.example")
+    with page.expect_response("**/control/symlink/invitations") as created:
+        panel.get_by_role("button", name="Create pairing code").click()
+    identifier = created.value.json()["invitation_id"]
+    image = panel.get_by_role("img", name="Scan with ENGRAI to pair this device")
+    expect(image).to_be_visible()
+    assert image.get_attribute("src").startswith("data:image/svg+xml;base64,")
+    assert image.evaluate("img => img.complete && img.naturalWidth > 0")
+    expect(panel.locator(".copy-field code")).to_contain_text("engrai://pair#")
+    with page.expect_response(f"**/control/symlink/invitations/{identifier}") as cancelled:
+        page.locator('.sheet[role="dialog"] .icon-button').click()
+    assert cancelled.value.request.method == "DELETE"
+    page.locator(".avatar").click()
+    expect(page.get_by_test_id("symlink").locator("img")).to_have_count(0)
+
+
 def test_last_key_cannot_be_revoked(page: Page) -> None:
     open_account(page)
     page.wait_for_selector('[data-testid="api-keys"] .key-list li')

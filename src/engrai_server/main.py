@@ -49,6 +49,7 @@ from .preferences import PreferenceError, PreferenceStore
 from .profiles import RouteProfile, ProfileError, ProfileStore
 from .settings import get_settings
 from .throttle import LoginThrottle
+from .symlink import PairingStore, create_symlink
 
 
 settings = get_settings()
@@ -1101,3 +1102,30 @@ async def openai_proxy(path: str, request: Request):
             status_code=502,
             content={"error": {"message": str(exc), "type": "upstream_error"}},
         )
+
+
+async def symlink_models() -> dict[str, Any]:
+    result = await list_models()
+    # v1 implements text inference; image operations will negotiate their own capability.
+    result["data"] = [item for item in result["data"] if item["owned_by"] == "self"]
+    return result
+
+
+async def symlink_chat(body: dict[str, Any]) -> Response:
+    """Reuse the exact chat route after SymLink has authenticated and authorized the peer.
+
+    No HTTP loopback hop, API-key minting, arbitrary paths, or admin delegation.
+    """
+    payload = json.dumps(body, allow_nan=False).encode("utf-8")
+
+    async def receive():
+        return {"type": "http.request", "body": payload, "more_body": False}
+
+    request = Request({"type": "http", "method": "POST", "path": "/v1/chat/completions",
+                       "query_string": b"", "headers": [(b"content-type", b"application/json")]}, receive)
+    return await openai_proxy("chat/completions", request)
+
+
+symlink_store = PairingStore(settings.symlink_state_path or settings.credentials_path.with_name("symlink.json"))
+app.include_router(create_symlink(store=symlink_store, require_admin=require_admin,
+                                 models=symlink_models, chat=symlink_chat))

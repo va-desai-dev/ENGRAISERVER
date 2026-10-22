@@ -23,3 +23,14 @@ include filter is mandatory to prevent unbounded repository pulls. Inject
 `HF_TOKEN` as a scoped read-only process/container secret. ENGRAI relies on
 the Hub library's standard credential lookup and never returns the token to
 the browser or writes it to download history.
+
+## SymLink pairing
+
+SymLink v1 is an initial implementation of an encrypted application channel;
+see [the protocol and current limits](docs/SYMLINK.md). Pairing QR codes contain
+single-use secrets. Create them through a trusted admin connection and do not
+publish or log them. Device revocation closes active sessions. The protocol
+authenticates possession of device keys, not the client application's provenance.
+The persistent `symlink.json` contains the server private key and requires the same
+private backup handling as credentials. This implementation has not undergone an
+independent security audit.

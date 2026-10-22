@@ -1439,3 +1439,6 @@ button.studio-link { cursor: pointer; }
   overflow-wrap: anywhere;
 }
 .ledger-status { margin: 0 0 var(--s4); color: var(--text-quiet); font-size: 0.8125rem; }
+.symlink-pairing { display: grid; justify-items: start; gap: 12px; }
+.symlink-pairing img { background: white; padding: 12px; max-width: 100%; height: auto; border-radius: 12px; }
+.symlink-pairing .copy-field { width: 100%; min-width: 0; }

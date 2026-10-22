@@ -35,7 +35,7 @@ jobs:
       - name: Install build dependencies (maintainer environment only)
         run: uv sync --frozen --extra dev
       - name: Test runtime and installer contracts
-        run: uv run pytest tests/test_runtime.py tests/test_cli.py tests/test_cli_bundle.py tests/test_cli_installer.py tests/test_host.py tests/test_worker.py tests/test_image_generation.py
+        run: uv run pytest tests/test_runtime.py tests/test_cli.py tests/test_cli_bundle.py tests/test_cli_installer.py tests/test_host.py tests/test_worker.py tests/test_image_generation.py tests/test_symlink.py
       - name: Fetch pinned engine sources
         run: uv run python scripts/fetch-engine-sources.py
       - name: Build text inference engine

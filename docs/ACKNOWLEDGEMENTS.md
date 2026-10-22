@@ -10,6 +10,13 @@ ENGRAISERVER builds its runtimes from pinned upstream sources. The exact tag, co
 |`card-studio`| [(c) 2025 Tremontaine](https://github.com/zebede1980/CardGenV2) | MIT |
 
 ## Upstream Frameworks
+SymLink uses [noiseprotocol](https://github.com/plizonczyk/noiseprotocol) (MIT),
+[cryptography](https://github.com/pyca/cryptography) (Apache-2.0 or BSD-3-Clause),
+and [qrcode](https://github.com/lincolnloop/python-qrcode) (BSD-3-Clause).
+These local libraries implement the Noise channel and QR rendering; no hosted
+networking account or service is introduced by them. Their package metadata and
+license files are included with the standalone Python distribution.
+
 Existing frameworks also include libraries from their upstream vendors. Each license text ships in the bundle’s `licenses/` directory:
 | Library | License | Runtime |
 | --- | --- | --- |

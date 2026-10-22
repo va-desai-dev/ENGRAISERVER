@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -11,6 +12,33 @@ from engrai_server.domain.store import DeploymentStore
 from engrai_server.llamacpp import LlamaCppControlPlane
 from engrai_server.profiles import ProfileStore
 from engrai_server.settings import Settings
+
+
+@pytest.mark.asyncio
+async def test_cancellation_before_response_headers_releases_generation_lane(tmp_path):
+    settings = Settings()
+    control = LlamaCppControlPlane(settings, ProfileStore(tmp_path / "routes", []),
+                                   DeploymentStore(tmp_path / "deployments"))
+    await control.client.aclose()
+    started = asyncio.Event()
+
+    async def handler(request):
+        started.set()
+        await asyncio.sleep(30)
+        return httpx.Response(200)
+
+    control.client = httpx.AsyncClient(base_url="http://worker.test", transport=httpx.MockTransport(handler))
+    task = asyncio.create_task(control.forward_openai("POST", "chat/completions", b"{}", "", "application/json"))
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not control.generation_lock.locked()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await control.client.aclose()
 
 
 class OneChunkStream(httpx.AsyncByteStream):

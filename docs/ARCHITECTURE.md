@@ -2,7 +2,7 @@
 
 ENGRAI SERVER is the trusted host daemon between client devices and local compute. The product owns the stable contract; numerical engines are replaceable providers below it.
 ## Layers
-This diagram is a product-direction sketch. The current implementation is a single gateway with local worker processes; SymLink and the depicted global edge-distribution layer are planned. Network tunnels are operator-managed infrastructure, not provisioned by the gateway. Installation does not require those planned layers.
+This diagram is a product-direction sketch. The current implementation is a single gateway with local worker processes and an initial [SymLink paired application channel](SYMLINK.md). The depicted global edge-distribution layer remains planned. Network tunnels are operator-managed infrastructure, not provisioned by the gateway. Installation does not require those planned layers.
 ```mermaid
 flowchart TB
     %% --- LAYER 1 & 2: ENGINE CORE & CONTROL MATRIX (HORIZONTAL COMPONENT) ---
@@ -87,7 +87,7 @@ flowchart TB
     class FACTORY_LAYER,PayloadFactory,OutboundCaller serializationFactory;
     class EGRESS_DISTRIBUTION,DistributionGrid,EdgeDevices distributionNetwork;
 ```
-WireGuard is transport infrastructure, not the application protocol. SymLink will run above it and carry ENGRAI device identity, capability negotiation, typed operations, state, event streams, and transfers. Upstream engine APIs are never reachable by client devices.
+WireGuard is transport infrastructure, not the application protocol. SymLink v1 runs over an existing WebSocket-capable path and provides key-based device pairing, encrypted sessions, text-model listing and streaming chat. Broader capability negotiation, state/event subscriptions and transfers remain planned. Upstream engine APIs are never reachable by client devices.
 
 ## Sources of Truth
 | Manifest | Source |

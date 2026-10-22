@@ -1,0 +1,63 @@
+{
+  "warning": "Synthetic test keys only. NEVER use in production.",
+  "vectors": [
+    {
+      "mode": "pair",
+      "protocol": "Noise_XXpsk0_25519_ChaChaPoly_SHA256",
+      "identifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "prologue": "ENGRAI-SymLink/1\npair\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nzo060cy2M-x7cMF4FKXHbs0CloUFDTRHRboFhw5YfVk",
+      "server_key": "zo060cy2M-x7cMF4FKXHbs0CloUFDTRHRboFhw5YfVk",
+      "client_private_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+      "server_private_hex": "0202020202020202020202020202020202020202020202020202020202020202",
+      "client_ephemeral_hex": "0303030303030303030303030303030303030303030303030303030303030303",
+      "server_ephemeral_hex": "0404040404040404040404040404040404040404040404040404040404040404",
+      "psk_hex": "0505050505050505050505050505050505050505050505050505050505050505",
+      "handshake": [
+        {
+          "sender": "client",
+          "hex": "5dfedd3b6bd47f6fa28ee15d969d5bb0ea53774d488bdaf9df1c6e0124b3ef223ae207dd9621b34f10f1c676591f6705"
+        },
+        {
+          "sender": "server",
+          "hex": "ac01b2209e86354fb853237b5de0f4fab13c7fcbf433a61c019369617fecf10b415fb37ea9138f4c773bb1ed750f2be8428bc2c309b0b98941e713877861f1fc82cbc634a75eede54d262ca87c3ee4dcb1130fad3ebe53ba80ab0510d8eda513"
+        },
+        {
+          "sender": "client",
+          "hex": "eb08aaf342bc49309d32e1ecb5ddd959dc1a078a78640197426902b98759293725056dbdebedbf34fdb8effbf649c6c09164456d730152b56b0a0d57361a13bb"
+        }
+      ],
+      "handshake_hash_hex": "1dd4c60978aa98b838a89961feab467d76a8757580b64ef766c387cc42e7f986",
+      "request_utf8": "{\"type\":\"request\",\"id\":\"one\",\"operation\":\"ping\"}",
+      "request_ciphertext_hex": "f46c2d01dfdb73aca5d1935ebb239fb5efa35423ca87c5d4f8d2588619a62679e6142e0544014e516cddea6147bc92ef78cfcbc70f7f2d7c8a05e4ad7983d050",
+      "response_utf8": "{\"type\":\"response.end\",\"id\":\"one\"}",
+      "response_ciphertext_hex": "8054272471242f9ddf35bb6ca8c0f17ccf1bf8fefca0994a67091a9b324cea9eefc0bddd664ace7ec581dd8b3f4694545f24"
+    },
+    {
+      "mode": "session",
+      "protocol": "Noise_IK_25519_ChaChaPoly_SHA256",
+      "identifier": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "prologue": "ENGRAI-SymLink/1\nsession\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nzo060cy2M-x7cMF4FKXHbs0CloUFDTRHRboFhw5YfVk",
+      "server_key": "zo060cy2M-x7cMF4FKXHbs0CloUFDTRHRboFhw5YfVk",
+      "client_private_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+      "server_private_hex": "0202020202020202020202020202020202020202020202020202020202020202",
+      "client_ephemeral_hex": "0303030303030303030303030303030303030303030303030303030303030303",
+      "server_ephemeral_hex": "0404040404040404040404040404040404040404040404040404040404040404",
+      "psk_hex": null,
+      "handshake": [
+        {
+          "sender": "client",
+          "hex": "5dfedd3b6bd47f6fa28ee15d969d5bb0ea53774d488bdaf9df1c6e0124b3ef22d5ea48b87c259312e4124f5b8ab09dbabfeeac5b1a722c5a59f272aaf50460060d60b74bc39ea75f928b9ffefe427932e90117587ee8f7c017f7656f0494371e"
+        },
+        {
+          "sender": "server",
+          "hex": "ac01b2209e86354fb853237b5de0f4fab13c7fcbf433a61c019369617fecf10b5e3145a2737f34691acb534bf7dbe451"
+        }
+      ],
+      "handshake_hash_hex": "ce46e2f1b9b35b701f1dd053296f9d0dba923fb78475004f94092f5f6188de48",
+      "request_utf8": "{\"type\":\"request\",\"id\":\"one\",\"operation\":\"ping\"}",
+      "request_ciphertext_hex": "bae0ab08ad806e354f3e7be0d0f5dce2526aa1d5d10abe43d699e22841b53f0174472ecb48a1bef46d5421bd1f1c20f95345ffb79c89b7d6985eb90f035aba4e",
+      "response_utf8": "{\"type\":\"response.end\",\"id\":\"one\"}",
+      "response_ciphertext_hex": "344455066e05198c2a695eff5802c2781894b3f7f672262ef709efcea1d5590a67d623eb3ea7024ee98db75fd463d5e887fa"
+    }
+  ]
+}

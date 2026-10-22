@@ -4,6 +4,7 @@ import type { ApiKey, PreflightReport } from "../lib/types";
 import { since } from "../lib/format";
 import { useStore } from "../store/useStore";
 import { Sheet } from "./Sheet";
+import { SymLink } from "./SymLink";
 import { Button, CopyField, ErrorNote, Field } from "./primitives";
 
 /* Two separate ways this panel used to overwrite what was being typed, and
@@ -197,6 +198,7 @@ export function Account({ open, onClose }: { open: boolean; onClose: () => void 
         </>
       }
     >
+      <SymLink open={open} />
       <section className="account-block" data-testid="api-keys">
         <div className="block-head">
           <div>

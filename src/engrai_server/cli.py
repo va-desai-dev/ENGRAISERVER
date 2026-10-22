@@ -82,6 +82,9 @@ def command_serve(args: argparse.Namespace) -> int:
         proxy_headers=True,
         forwarded_allow_ips=settings.forwarded_peers,
         reload=args.reload,
+        ws_max_size=65535,
+        ws_max_queue=4,
+        ws_per_message_deflate=False,
         reload_dirs=[str(Path(__file__).resolve().parent)] if args.reload else None,
     )
     return 0
