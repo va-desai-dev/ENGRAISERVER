@@ -38,11 +38,12 @@ Restart with `engrai-server serve` or, for an installed Linux service, `engrai-s
 
 ```bash
 uv run pytest
+uv run --frozen python scripts/check-version.py
 ./scripts/build-ui.sh
 uv build
 ```
 
-The gateway serves the compiled UI in `src/engrai_server/static/`; include those files alongside changes to `ui/src/`. For live UI work, run `uv run engrai-server serve` in one terminal and `./scripts/dev.sh` in another. The watcher does not start the gateway. See [ui/START-HERE.md](../ui/START-HERE.md). Browser tests skip when Playwright's Chromium is unavailable. To enable them:
+The gateway serves the compiled UI in `src/engrai_server/static/`; include those files alongside changes to `ui/src/` for source installs and wheels. GitHub Actions and the CLI packager rebuild the UI from source automatically, so CLI bundles always contain current frontend changes. See [CLI-BUNDLES.md](CLI-BUNDLES.md) for automatic builds, version checks, and tagged releases. For live UI work, run `uv run engrai-server serve` in one terminal and `./scripts/dev.sh` in another. The watcher does not start the gateway. See [ui/START-HERE.md](../ui/START-HERE.md). Browser tests skip when Playwright's Chromium is unavailable. To enable them:
 
 ```bash
 uv run playwright install chromium

@@ -1,6 +1,6 @@
 [project]
 name = "engrai-server"
-version = "0.1.1"
+version = "1.0.0"
 description = "A sovereign, GPU-agnostic host control plane and runtime orchestrator"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -58,6 +58,7 @@ include = [
   "/scripts/build-ui.sh",
   "/scripts/install.sh",
   "/scripts/build-cli-bundle.py",
+  "/scripts/check-version.py",
   "/scripts/cli-entrypoint.py",
   "/scripts/build-runtime.py",
   "/scripts/fetch-engine-sources.py",

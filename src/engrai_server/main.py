@@ -8,6 +8,7 @@ import re
 import secrets
 import time
 from contextlib import asynccontextmanager
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -102,7 +103,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=PRODUCT_NAME,
     description="Sovereign host control plane and runtime orchestrator",
-    version="0.1.1",
+    version=version("engrai-server"),
     docs_url=None,
     redoc_url=None,
     lifespan=lifespan,

@@ -36,7 +36,7 @@ An average user shouldn't need to learn machine learning to run local LLMs. So i
 **Download ENGRAISERVER's latest release** directly from GitHub by pasting this into your Terminal for macOS or Linux:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/va-desai-dev/ENGRAISERVER/master/scripts/install.sh | sh -s -- --version v0.1.0
+curl -fsSL https://raw.githubusercontent.com/va-desai-dev/ENGRAISERVER/master/scripts/install.sh | sh
 ```
 
 > [!TIP]

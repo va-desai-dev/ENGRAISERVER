@@ -3,7 +3,7 @@
 The end-user download is one compressed archive for an OS, architecture, and backend. It includes the executable, its private Python runtime and dependencies, the console and Card Studio, and **both** verified inference engines. Model weights and personal state never ship inside the archive. Python wheels remain available for developers; they are not the end-user installation contract.
 
 ## Availability and Installation
-The installer and build pipeline are implemented. Platform archives are not automatically published by committing these files. Complete the qualification and publication steps below before announcing a working download.
+Pushes to `master`, pull requests targeting `master`, and manual workflow runs build fresh platform archives in GitHub Actions. Pushing a version tag such as `v1.0.0` also attaches the checked archives to a draft GitHub release. Publish that draft after qualification to make it available to the installer; branch pushes do not replace an existing release or update an installed app.
 
 After publication:
 
@@ -21,7 +21,7 @@ Run the installer again to update, after stopping ENGRAI. Credentials, profiles,
 Options can be passed after `sh -s --`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/va-desai-dev/ENGRAISERVER/master/scripts/install.sh | sh -s -- --version v0.1.0 --backend cpu
+curl -fsSL https://raw.githubusercontent.com/va-desai-dev/ENGRAISERVER/master/scripts/install.sh | sh -s -- --version v1.0.0 --backend cpu
 ```
 
 Other options: `--prefix /absolute/app/path`, `--bin-dir /absolute/bin/path`, and `--no-modify-path`. Installation never starts a background service. An existing Linux service using the stable launcher picks up the update on restart. Services created from an older source installation must be reinstalled with `engrai-server service install` once to adopt the new launcher.
@@ -41,14 +41,15 @@ Additional CUDA, ROCm, or Vulkan archives use the same format and require qualif
 The bundled executable locates `runtimes/` beside itself, so moving an extracted bundle is supported. With the default data layout, user-installed runtimes take precedence; otherwise the embedded engine is used. Explicit custom runtime roots remain authoritative, and a corrupt user runtime is reported rather than hidden by fallback. Runtime installs still write to the user's data store, never into the installed program. Application upgrades select a new complete directory.
 
 ## Build and Qualify (Maintainers Only)
-Run the **Build complete CLI bundles** GitHub Actions workflow manually. It builds both pinned engines on each host, freezes the Python CLI with PyInstaller, checks runtime receipts after relocating the result, and uploads the complete archives and SHA-256 sidecars as workflow artifacts. It does not publish a release.
+The **Build complete CLI bundles** GitHub Actions workflow runs automatically on pushes to `master`, pull requests targeting `master`, and `v*` tags. It can also be run manually. It checks version consistency, rebuilds the UI with Node.js 22 and the committed npm lockfile, and runs the application tests before building both pinned engines on each host. The CLI packager always rebuilds the UI, checks that every console and Card Studio web file matches the checkout, freezes the Python CLI with PyInstaller, checks runtime receipts after relocating the result, and uploads the complete archives and SHA-256 sidecars as workflow artifacts. Download artifacts from the run for the commit you want to test.
 
 CMake progress streams into separate text-engine and image-engine build steps. The Linux archives built on Ubuntu 22.04 are also installed and run on Ubuntu 24.04 runners for both architectures. These checks use fresh user directories, block developer commands from the installed application's PATH, and verify startup, account creation, and saved-card preservation across reinstall. They do not exercise model inference or qualify every Linux distro.
 
-For a local build, use the existing engine build workflow first:
+For a local build, install Node.js 22/npm and uv, then use the existing engine build workflow first:
 
 ```sh
 uv sync --frozen
+uv run --frozen python scripts/check-version.py
 uv run python scripts/fetch-engine-sources.py
 uv run python scripts/build-runtime.py --engine llama.cpp --backend cpu
 uv run python scripts/build-runtime.py --engine stable-diffusion.cpp --backend cpu
@@ -61,6 +62,20 @@ Use `metal` on Apple Silicon. Both supplied runtimes must match the build host, 
 
 Before publication, test installation with a fresh user data directory and no developer tools on PATH. Verify startup, account creation, both interfaces, text and image model loading/generation, shutdown, reinstall/update, and saved data preservation. Check bundled licenses and native shared-library dependencies. Signing/notarization for macOS distribution remains pending as a next step.
 
-Attach the complete archives and their checksum sidecars to a reviewed GitHub release. Keep the filenames unchanged: the installer selects by OS/architecture and backend. The default installer uses GitHub's latest published release; a prerelease is usable through `--version TAG`. Publish all advertised targets together, and verify the public install command before announcing availability.
+## Versioning and releasing
+
+`pyproject.toml` defines the application version. The API, CLI, and bundle manifest read the installed package metadata. Keep `ui/package.json`, both root version entries in `ui/package-lock.json`, the application entry in `uv.lock`, and the default `OCI_VERSION` in `Containerfile` aligned. `scripts/check-version.py` rejects mismatches; tagged builds additionally require the tag to equal `v` plus the application version. Native engine versions in `runtime/*.lock.json` identify independently pinned engines and do not change for an application-only release.
+
+For the 1.0.0 release, commit and push the version and source changes, then tag that commit:
+
+```sh
+uv run --frozen python scripts/check-version.py --tag v1.0.0
+git tag -a v1.0.0 -m "ENGRAISERVER v1.0.0"
+git push origin v1.0.0
+```
+
+After all four platform builds and both Linux compatibility checks pass, the tag workflow verifies the archive checksums and creates or updates the `v1.0.0` draft with all eight assets. An existing empty draft is supported. A rerun may replace draft assets, but the workflow refuses to overwrite a published release. For an existing tag, select that tag when running the workflow manually to rebuild its exact source.
+
+Review and publish the complete draft after qualification. Keep the filenames unchanged: the installer selects by OS/architecture and backend. The default installer uses GitHub's latest published release; a prerelease is usable through `--version TAG`. Publish all advertised targets together, and verify the public install command before announcing availability. Users update by stopping ENGRAI, rerunning the installer, and restarting it.
 
 Build references: [PyInstaller bundles](https://pyinstaller.org/en/stable/operating-mode.html) and [runtime paths](https://pyinstaller.org/en/stable/runtime-information.html).

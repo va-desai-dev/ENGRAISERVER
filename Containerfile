@@ -83,7 +83,7 @@ RUN if [ -n "${CUDA_ARCHITECTURES}" ]; then \
 
 FROM ${RUNTIME_IMAGE} AS final
 ARG DEBIAN_FRONTEND=noninteractive
-ARG OCI_VERSION=0.1.0
+ARG OCI_VERSION=1.0.0
 LABEL org.opencontainers.image.title="ENGRAI SERVER" \
       org.opencontainers.image.description="Sovereign inference control plane with private native workers" \
       org.opencontainers.image.source="https://github.com/va-desai-dev/ENGRAISERVER" \

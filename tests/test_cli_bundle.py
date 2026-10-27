@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -16,6 +17,24 @@ spec = importlib.util.spec_from_file_location("build_cli_bundle", ROOT / "script
 assert spec and spec.loader
 builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(builder)
+
+
+def test_packaged_web_files_match_current_source(tmp_path, monkeypatch):
+    source = tmp_path / "checkout/src/engrai_server"
+    bundle = tmp_path / "bundle"
+    for name in ("static/assets/new.js", "static/index.html", "cardgen/web/src/new.js"):
+        path = source / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("current source")
+    monkeypatch.setattr(builder, "ROOT", tmp_path / "checkout")
+    with pytest.raises(RuntimeError, match="missing or stale"):
+        builder.verify_web_assets(bundle)
+    destination = bundle / "_internal/engrai_server"
+    shutil.copytree(source, destination)
+    builder.verify_web_assets(bundle)
+    (destination / "cardgen/web/src/new.js").write_text("previous release")
+    with pytest.raises(RuntimeError, match="cardgen/web/src/new.js"):
+        builder.verify_web_assets(bundle)
 
 
 def engine_bundle(root: Path, *, image: bool = False) -> Path:

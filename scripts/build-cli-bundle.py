@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build a standalone CLI with BOTH verified inference runtimes embedded.
 
-Run on the target OS/architecture in an environment with ENGRAI and PyInstaller
-installed. No Python, package manager, or compiler is needed by the recipient.
+Run on the target OS/architecture with ENGRAI, PyInstaller, and Node.js/npm
+installed. The UI is rebuilt from source before freezing the application.
+No Python, package manager, or compiler is needed by the recipient.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import sysconfig
 import tarfile
 import tempfile
 import time
+import tomllib
 import urllib.error
 import urllib.request
 from importlib.metadata import version
@@ -28,6 +30,18 @@ from pathlib import Path
 from engrai_server.runtime import IMAGE_RUNTIME, TEXT_RUNTIME, host_target, install_runtime
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def verify_web_assets(bundle: Path) -> None:
+    """Require every current console and Card Studio file in the frozen app."""
+    for directory in ("static", "cardgen/web"):
+        source = ROOT / "src" / "engrai_server" / directory
+        for path in source.rglob("*"):
+            if not path.is_file() or path.name == ".DS_Store":
+                continue
+            target = bundle / "_internal" / "engrai_server" / directory / path.relative_to(source)
+            if not target.is_file() or target.read_bytes() != path.read_bytes():
+                raise RuntimeError(f"packaged web asset missing or stale: {directory}/{path.relative_to(source)}")
 
 
 def smoke_gateway(executable: Path, work: Path, env: dict[str, str]) -> None:
@@ -103,6 +117,11 @@ def main() -> int:
     operating_system, arch = host_target()
     if operating_system not in {"linux", "macos"} or arch not in {"x86_64", "aarch64"}:
         parser.error(f"unsupported build host: {operating_system}/{arch}")
+    subprocess.run([sys.executable, str(ROOT / "scripts/check-version.py")], check=True, cwd=ROOT)
+    app_version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
+    if version("engrai-server") != app_version:
+        parser.error("installed ENGRAI version differs from this checkout; run uv sync --frozen first")
+    subprocess.run(["bash", str(ROOT / "scripts/build-ui.sh")], check=True, cwd=ROOT)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="engrai-cli-build-") as temp:
         work = Path(temp)
@@ -121,6 +140,7 @@ def main() -> int:
             check=True, cwd=ROOT,
         )
         bundle = work / "dist" / "engrai-server"
+        verify_web_assets(bundle)
         # Data collection sees editable checkout files as well as tracked data.
         # Finder metadata must never enter a downloadable distribution.
         for metadata_file in bundle.rglob(".DS_Store"):
@@ -133,7 +153,7 @@ def main() -> int:
             raise RuntimeError(f"Python license missing from build environment: {python_license}")
         shutil.copy2(python_license, bundle / "PYTHON-LICENSE.txt")
         metadata = {
-            "schema_version": 1, "version": version("engrai-server"),
+            "schema_version": 1, "version": app_version,
             "os": operating_system, "arch": arch, "backend": backend,
             "runtimes": [TEXT_RUNTIME, IMAGE_RUNTIME],
         }
