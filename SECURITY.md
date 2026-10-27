@@ -6,7 +6,7 @@ Use GitHub private vulnerability reporting for this repository when available.
 Do not put API keys, passwords, credential-store contents, tunnel credentials,
 or private model paths in a public issue.
 
-## Deployment boundary
+## Deployment Boundary
 
 Only ENGRAI should be reachable through a LAN, WireGuard, or reverse-proxy
 listener. Every engine must remain on loopback or private IPC. Treat a
@@ -24,7 +24,7 @@ include filter is mandatory to prevent unbounded repository pulls. Inject
 the Hub library's standard credential lookup and never returns the token to
 the browser or writes it to download history.
 
-## SymLink pairing
+## SymLink Pairing
 
 SymLink v1 is an initial implementation of an encrypted application channel;
 see [the protocol and current limits](docs/SYMLINK.md). Pairing QR codes contain
