@@ -15,6 +15,7 @@ classifiers = [
   "Topic :: System :: Systems Administration",
 ]
 dependencies = [
+  "anyio>=4,<5",
   "fastapi>=0.116,<1",
   "huggingface-hub>=1.0,<3",
   "httpx>=0.28,<1",

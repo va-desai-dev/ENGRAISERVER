@@ -213,6 +213,7 @@ name = "engrai-server"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "anyio" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -233,6 +234,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyio", specifier = ">=4,<5" },
     { name = "cryptography", specifier = ">=46,<51" },
     { name = "fastapi", specifier = ">=0.116,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },

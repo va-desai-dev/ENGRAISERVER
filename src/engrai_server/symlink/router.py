@@ -11,6 +11,7 @@ import secrets
 import time
 from collections.abc import Awaitable, Callable
 
+import anyio
 import qrcode
 import qrcode.image.svg
 from cryptography.exceptions import InvalidTag
@@ -188,9 +189,13 @@ def create_symlink(*, store: PairingStore, require_admin: Callable,
             for task in done:
                 task.result()
         finally:
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            # ASGI cancellation can arrive after a normal disconnect has already
+            # started cleanup. Shield the drain so it cannot cancel these tasks
+            # a second time and interrupt the stream's resource finalizers.
+            with anyio.CancelScope(shield=True):
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
 
     async def connect(ws: WebSocket, mode: str, identifier: str):
         nonlocal connections

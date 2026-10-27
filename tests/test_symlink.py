@@ -27,7 +27,12 @@ ADMIN = {"Authorization": "Bearer test-admin"}
 
 
 @pytest.fixture
-def service(tmp_path):
+def cleanup_started():
+    return threading.Event()
+
+
+@pytest.fixture
+def service(tmp_path, cleanup_started):
     store = PairingStore(tmp_path / "symlink.json")
     app = FastAPI()
     calls = []
@@ -50,6 +55,9 @@ def service(tmp_path):
                     await asyncio.sleep(30)
                 yield b"data: [DONE]\n\n"
             finally:
+                cleanup_started.set()
+                if body.get("slow_cleanup"):
+                    await asyncio.sleep(0.05)
                 stopped.set()
 
         return StreamingResponse(stream(), media_type="text/event-stream")
@@ -270,6 +278,20 @@ def test_disconnect_cancels_generation(service):
         read(ws, connection)
         read(ws, connection)
     assert stopped.wait(2)
+
+
+def test_disconnect_finishes_cleanup_during_asgi_cancellation(service, cleanup_started):
+    client, _, _, stopped = service
+    with paired(client) as (ws, connection, *_):
+        write(ws, connection, {"type": "request", "id": "one", "operation": "chat.completions",
+                               "body": {"wait": True, "slow_cleanup": True}})
+        assert read(ws, connection)["type"] == "response.start"
+        assert read(ws, connection)["type"] == "response.chunk"
+        # Begin normal disconnect cleanup before TestClient cancels the ASGI
+        # scope on context exit. This also happens during server shutdown.
+        ws.close()
+        assert cleanup_started.wait(2)
+    assert stopped.is_set()
 
 
 @pytest.mark.parametrize("operation", ["control.state", "credentials", "http.request", "images.generate"])
