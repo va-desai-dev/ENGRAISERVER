@@ -76,6 +76,8 @@ git push origin v1.0.0
 
 After all four platform builds and both Linux compatibility checks pass, the tag workflow verifies the archive checksums and creates or updates the `v1.0.0` draft with all eight assets. An existing empty draft is supported. A rerun may replace draft assets, but the workflow refuses to overwrite a published release. For an existing tag, select that tag when running the workflow manually to rebuild its exact source.
 
+Plain `vX.Y.Z` tags are explicitly marked as stable releases, including when an existing draft was previously marked as a prerelease. Tags with preview suffixes remain prereleases. Draft status only means unpublished; it does not mean prerelease. When publishing a stable draft, leave **Set as a pre-release** unchecked and select **Set as the latest release** so the default installer finds it.
+
 Review and publish the complete draft after qualification. Keep the filenames unchanged: the installer selects by OS/architecture and backend. The default installer uses GitHub's latest published release; a prerelease is usable through `--version TAG`. Publish all advertised targets together, and verify the public install command before announcing availability. Users update by stopping ENGRAI, rerunning the installer, and restarting it.
 
 Build references: [PyInstaller bundles](https://pyinstaller.org/en/stable/operating-mode.html) and [runtime paths](https://pyinstaller.org/en/stable/runtime-information.html).

@@ -159,13 +159,19 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          prerelease=true
+          if [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            prerelease=false
+          fi
           if draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft); then
             if [ "$draft" != true ]; then
               echo "Refusing to replace assets of published release $RELEASE_TAG" >&2
               exit 1
             fi
+            gh release edit "$RELEASE_TAG" --prerelease="$prerelease"
           else
             gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --prerelease="$prerelease" \
               --title "ENGRAISERVER $RELEASE_TAG" --generate-notes
           fi
           gh release upload "$RELEASE_TAG" release-assets/* --clobber
