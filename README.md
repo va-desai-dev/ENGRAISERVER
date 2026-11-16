@@ -7,8 +7,9 @@
 
 [![Linux](https://img.shields.io/badge/For_Linux-FCC624?logo=linux&logoColor=black)](#)
 [![macOS](https://img.shields.io/badge/For_macOS-000000?logo=apple&logoColor=F0F0F0)](#)
-[![CUDA](https://img.shields.io/badge/CUDA_Built-76B900?logo=nvidia&logoColor=fff)](#)
-[![MLX](https://custom-icon-badges.demolab.com/badge/MLX_Built-151E29?logo=mlx&logoColor=fff)](#)
+[![CUDA](https://img.shields.io/badge/Supports_CUDA-76B900?logo=nvidia&logoColor=fff)](#)
+[![MLX](https://custom-icon-badges.demolab.com/badge/Supports_MLX-151E29?logo=mlx&logoColor=fff)](#)
+[![Vulkan](https://img.shields.io/badge/Supports_Vulkan-AE0F28?logo=Vulkan&logoColor=fff)](#)
 [![Hugging Face](https://img.shields.io/badge/Hugging%20Face_Friendly-FFD21E?logo=huggingface&logoColor=000)](#)
 [![Cloudflare](https://img.shields.io/badge/Cloudflare_Ready-F38020?logo=Cloudflare&logoColor=white)](#)
   
