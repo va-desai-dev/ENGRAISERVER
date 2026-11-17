@@ -1,7 +1,10 @@
 <div align="center">
+
 # ENGRAISERVER
 
 ### Simplified Hosting for Local Inference Models
+
+<div align="center">
 
 [![Linux](https://img.shields.io/badge/For_Linux-FCC624?logo=linux&logoColor=black)](#)
 [![macOS](https://img.shields.io/badge/For_macOS-000000?logo=apple&logoColor=F0F0F0)](#)
@@ -10,12 +13,14 @@
 [![Vulkan](https://img.shields.io/badge/Supports_Vulkan-AE0F28?logo=Vulkan&logoColor=fff)](#)
 [![Hugging Face](https://img.shields.io/badge/Hugging%20Face_Friendly-FFD21E?logo=huggingface&logoColor=000)](#)
 [![Cloudflare](https://img.shields.io/badge/Cloudflare_Ready-F38020?logo=Cloudflare&logoColor=white)](#)
-  
+
+</div>
+
+</div>
+
 Make **local LLMs easy** to access. **ENGRAISERVER runs your local AI models** and connects them to chat or image generation apps, **supporting OpenAI-compatible keys.** 
 
 An average user shouldn't need to learn machine learning to run local LLMs. So installing and using ENGRAISERVER feels like using an app, not setting up a development environment.
-
-</div>
 
 ## Features
 
