@@ -1,3 +1,4 @@
+<div align="center">
 # ENGRAISERVER
 
 ### Simplified Hosting for Local Inference Models
@@ -13,6 +14,8 @@
 Make **local LLMs easy** to access. **ENGRAISERVER runs your local AI models** and connects them to chat or image generation apps, **supporting OpenAI-compatible keys.** 
 
 An average user shouldn't need to learn machine learning to run local LLMs. So installing and using ENGRAISERVER feels like using an app, not setting up a development environment.
+
+</div>
 
 ## Features
 
