@@ -311,16 +311,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"engrai-server {version()}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    def add_shared(sub: argparse.ArgumentParser) -> None:
+    def add_shared(sub: argparse.ArgumentParser, *, client: bool = False) -> None:
         # Every override is accepted everywhere, so `config --host 0.0.0.0`
         # previews exactly what `serve --host 0.0.0.0` would do.
         sub.add_argument(
             "--host",
-            help="address to bind. 127.0.0.1 (default) is reachable only from "
+            help="gateway host to connect to (unless --url is set)" if client else
+            "address to bind. 127.0.0.1 (default) is reachable only from "
             "this machine; 0.0.0.0 serves every interface; a specific address "
             "serves only the network holding it",
         )
-        sub.add_argument("--port", type=int, help="port to bind, when the default is taken")
+        sub.add_argument(
+            "--port", type=int,
+            help="gateway port to connect to (unless --url is set)" if client else
+            "port to bind, when the default is taken",
+        )
         sub.add_argument(
             "--forwarded-allow-ips",
             help="proxy addresses whose X-Forwarded-* headers are trusted",
@@ -377,6 +382,11 @@ def build_parser() -> argparse.ArgumentParser:
     routes.add_argument("--json", action="store_true")
     add_shared(routes)
     routes.set_defaults(func=command_routes)
+
+    # Clients talk only to the running gateway; they never own engine workers.
+    from .terminal import add_client_commands
+
+    add_client_commands(subparsers, add_shared)
 
     runtime = subparsers.add_parser(
         "runtime",

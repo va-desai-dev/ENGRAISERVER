@@ -50,6 +50,62 @@ Standalone archives embed both runtimes, and a fresh installation discovers them
 > [!CAUTION]
 > Private or gated downloads currently need a scoped read token in the server's `HF_TOKEN` environment variable. Put it in the private `gateway.env` file and restart. The token does not enter the browser.
 
+## Terminal chat and profile control
+
+Use the existing `engrai-server` command to talk to a running gateway without
+opening the web interface. Use a saved text route ID from `engrai-server routes`:
+
+```bash
+export ENGRAI_API_KEY='your-client-api-key'
+export ENGRAI_ADMIN_TOKEN='your-admin-password-or-session-token'
+engrai-server load my-profile
+engrai-server chat my-profile
+engrai-server unload
+```
+
+`chat` needs only the client API key. Its first message lets the gateway load
+the requested profile through the normal inference path; a separate `load` is
+optional. `load` and `unload` need the administrator password or session token.
+These controls operate on the gateway's shared text worker, so switching or
+unloading a profile also affects other clients using that worker. They do not
+stop the gateway or replace its runtime.
+
+Replies stream as they arrive. Each terminal chat keeps its own conversation
+in memory and sends the full message history with each request. Nothing is
+saved to disk or resumed after exit. Failed or interrupted replies are excluded
+from subsequent context; already printed partial output may remain visible.
+History is not automatically truncated: use `/clear` if the conversation
+outgrows the profile's context window.
+
+| Chat command | Effect |
+| --- | --- |
+| `/models` | List available text route IDs from the connected gateway. |
+| `/load PROFILE` | Load/select a profile; changing profiles clears this chat's history. Requires admin credentials. |
+| `/unload` | Unload the shared text worker and clear this chat. Use `/load PROFILE` to continue. Requires admin credentials. |
+| `/clear` | Start fresh while retaining the `--system` instruction. |
+| `/help` | Show available commands. |
+| `/exit` or `/quit` | Exit without unloading the model or stopping the server. |
+
+Ctrl+C during generation cancels the local reply and returns to the prompt.
+Ctrl+C at the prompt or Ctrl+D exits. Interactive input is one message per line;
+use redirected stdin for a single multiline prompt:
+
+```bash
+engrai-server chat my-profile --system 'Answer concisely.'
+engrai-server chat my-profile --no-stream < prompt.txt
+engrai-server chat my-profile --url https://your-gateway.example
+```
+
+`--url` (or `ENGRAI_SERVER_URL`) takes the gateway root, **without `/v1`**.
+Otherwise the client uses the configured bind host and port; wildcard bind
+addresses connect over loopback. `--host` and `--port` also work for these
+commands. `--api-key` and `--admin-token` override the credential environment
+variables; prefer environment variables to keep secrets out of process
+arguments. `--timeout SECONDS` sets the HTTP inactivity timeout (600 seconds
+by default). `load --json` and `unload --json` print the gateway response for
+scripts. Piped chat writes only the reply to stdout and reports errors on stderr
+with a nonzero exit status.
+
 ## Background Service
 On **Linux ONLY**, stop the foreground gateway first, then run from any directory:
 

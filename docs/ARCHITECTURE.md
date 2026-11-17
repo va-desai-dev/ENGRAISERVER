@@ -122,6 +122,12 @@ The repository never treats an executable command as model identity. A model man
 The text gateway launches the verified ENGRAI llama.cpp runtime through `LlamaCppControlPlane`. A route records a model file and prompt policy; its typed llama.cpp deployment is compiled into the launch. Routes are created in the web UI and are never seeded or packaged. The image lane launches the separately pinned stable-diffusion.cpp runtime (`engrai-image`); there is no third-party fallback engine.
 
 ## Chat Completions
+The `engrai-server chat` command is an HTTP client implemented in
+`src/engrai_server/terminal.py`. It keeps message history in its own process
+and resends it to `/v1/chat/completions`; no server-side session store is needed.
+The CLI's `load` and `unload` commands use the existing authenticated control
+endpoints. Terminal exit never owns or terminates the gateway or its workers.
+
 `/v1/chat/completions` is rendered by the gateway, not by llama-server's chat handler (`src/engrai_server/engines/llamacpp/chat.py`). Roleplay clients send trailing assistant prefills, post-history `system` turns, and consecutive same-role messages. llama-server's handler rewrites prefills around the model's think markers and rejects or reorders unusual role sequences, which corrupts multi-turn output differently for each client. The gateway instead:
 1. Renders `messages` with the model's own template, read from the worker's `/props` (the GGUF's `tokenizer.chat_template` unless the deployment overrides it), treating template `raise_exception` calls as non-optional.
 2. Appends a non-blank trailing assistant message verbatim as a prefill;
