@@ -112,6 +112,9 @@ def _manifest_for(profile: RouteProfile) -> ModelManifest:
     """Represent an ad-hoc local GGUF with the portable adapter contract."""
 
     prompt = profile.prompt
+    artifacts = {"model": {"filename": profile.model_path.name}}
+    if profile.mmproj_path is not None:
+        artifacts["mmproj"] = {"filename": profile.mmproj_path.name}
     return ModelManifest.model_validate(
         {
             "schema_version": 2,
@@ -127,7 +130,8 @@ def _manifest_for(profile: RouteProfile) -> ModelManifest:
                 "repository": "local/compatibility-import",
                 "revision": "0000000",
             },
-            "artifacts": {"model": {"filename": profile.model_path.name}},
+            "artifacts": artifacts,
+            "required_engine_capabilities": ["multimodal"] if profile.mmproj_path else [],
             "prompt": prompt.model_dump(mode="json") if prompt else None,
         }
     )
@@ -308,6 +312,11 @@ class LlamaCppControlPlane:
         return status, executable, devices
 
     async def compile(self, profile: RouteProfile) -> tuple[DeploymentProfile, LaunchSpec]:
+        if not profile.routable:
+            raise LlamaCppError(
+                "Route requires readable GGUF model and projector files; missing: "
+                + ", ".join(str(path) for path in profile.missing_paths)
+            )
         try:
             deployment = self.deployments.get(profile.id)
         except KeyError as exc:
@@ -327,10 +336,13 @@ class LlamaCppControlPlane:
                 devices=device_map(devices, str(status["backend"])),
                 version=str(status["version"]),
             )
+            artifacts = {"model": profile.model_path.resolve()}
+            if profile.mmproj_path is not None:
+                artifacts["mmproj"] = profile.mmproj_path.resolve()
             launch = adapter.compile(
                 _manifest_for(profile),
                 planned,
-                {"model": profile.model_path.resolve()},
+                artifacts,
                 host=self.endpoint.host,
                 port=self.endpoint.port,
             )

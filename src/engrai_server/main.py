@@ -469,12 +469,21 @@ async def save_profile(profile_id: str, body: dict[str, Any]) -> dict[str, Any]:
             }
         )
         validate_extra_arguments(deployment.advanced.extra_arguments)
+        mmproj_path = body.get("mmproj_path")
+        if "mmproj_path" not in body:
+            # Older clients do not know this field. Only explicit null detaches it.
+            try:
+                existing = profiles.get(profile_id).mmproj_path
+                mmproj_path = str(existing) if existing else None
+            except KeyError:
+                pass
         profile = profiles.save(
             profile_id,
             name=str(body.get("name") or ""),
             model_path=str(model_path),
             prompt=prompt,
             notes=str(body.get("notes") or ""),
+            mmproj_path=mmproj_path,
         )
         deployments.save(deployment)
         control.invalidate_profile(profile_id)
@@ -1097,6 +1106,11 @@ async def openai_proxy(path: str, request: Request):
         return JSONResponse(
             status_code=400,
             content={"error": {"message": "Request body is not valid JSON"}},
+        )
+    except ProfileError as exc:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"message": str(exc), "type": "invalid_request_error"}},
         )
     except (httpx.HTTPError, LlamaCppError) as exc:
         return JSONResponse(

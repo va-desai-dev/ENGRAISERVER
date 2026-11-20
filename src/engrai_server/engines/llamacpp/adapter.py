@@ -28,6 +28,8 @@ _CONTROLLED_ARGUMENTS = frozenset(
         "-fit",
         "-mg",
         "-m",
+        "-mm",
+        "-mmu",
         "-n",
         "-ngl",
         "-np",
@@ -68,6 +70,7 @@ _CONTROLLED_ARGUMENTS = frozenset(
         "--media-path",
         "--metrics",
         "--mmproj",
+        "--mmproj-auto",
         "--mmproj-url",
         "--model",
         "--model-url",
@@ -81,6 +84,8 @@ _CONTROLLED_ARGUMENTS = frozenset(
         "--no-kv-offload",
         "--no-metrics",
         "--no-models-autoload",
+        "--no-mmproj",
+        "--no-mmproj-auto",
         "--no-slots",
         "--no-ui",
         "--no-ui-mcp-proxy",
@@ -159,6 +164,8 @@ class LlamaCppAdapter:
                     "chat",
                     "completion",
                     "jinja",
+                    "multimodal",
+                    "vision",
                     "tensor_split",
                     "flash_attention",
                     "quantized_kv",
@@ -190,9 +197,9 @@ class LlamaCppAdapter:
             )
         if manifest.format != "gguf":
             raise ValueError("the llama.cpp worker requires a GGUF model")
-        if manifest.task not in {"chat", "completion"} or manifest.capabilities.vision:
+        if manifest.task not in {"chat", "completion", "vision"}:
             raise ValueError(
-                "the initial direct llama.cpp worker supports text chat and completion only"
+                "the llama.cpp worker supports chat, completion, and vision tasks"
             )
         if not _is_loopback(host):
             raise ValueError("engine workers must bind to a loopback address")
@@ -204,6 +211,19 @@ class LlamaCppAdapter:
             raise ValueError("resolved artifacts must include the model role") from exc
         if not model_path.is_absolute():
             raise ValueError("resolved artifact paths must be absolute")
+        projector = artifacts.get("mmproj")
+        needs_projector = (
+            "mmproj" in manifest.artifacts or manifest.capabilities.vision or manifest.task == "vision"
+        )
+        if needs_projector and projector is None:
+            raise ValueError("multimodal models require a resolved mmproj artifact")
+        if projector is not None:
+            if "mmproj" not in manifest.artifacts:
+                raise ValueError("the model manifest must declare the mmproj artifact")
+            if not projector.is_absolute():
+                raise ValueError("resolved artifact paths must be absolute")
+            if projector == model_path:
+                raise ValueError("projector and model must be different files")
 
         unsupported = set(manifest.required_engine_capabilities) - self.capabilities().features
         if unsupported:
@@ -320,6 +340,11 @@ class LlamaCppAdapter:
                 arguments.extend(
                     ("--main-gpu", str(selected_devices.index(compute.main_gpu)))
                 )
+
+        if projector is not None:
+            arguments.extend(("--mmproj", str(projector)))
+            if compute.backend == "cpu":
+                arguments.append("--no-mmproj-offload")
 
         if manifest.prompt:
             if manifest.prompt.template == "none":

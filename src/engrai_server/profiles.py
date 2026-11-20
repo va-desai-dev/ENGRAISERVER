@@ -33,14 +33,22 @@ class RouteProfile:
     prompt: PromptPolicy | None
     notes: str
     modified_at: float
+    mmproj_path: Path | None = None
+
+    @property
+    def required_paths(self) -> list[Path]:
+        return [self.model_path] + ([self.mmproj_path] if self.mmproj_path else [])
 
     @property
     def routable(self) -> bool:
-        return self.model_path.is_file() and self.model_path.suffix.lower() == ".gguf"
+        return not self.missing_paths and all(
+            path.is_absolute() and path.suffix.lower() == ".gguf"
+            for path in self.required_paths
+        )
 
     @property
     def missing_paths(self) -> list[Path]:
-        return [] if self.model_path.is_file() else [self.model_path]
+        return [path for path in self.required_paths if not path.is_file()]
 
     def public_dict(self) -> dict[str, Any]:
         size_gb = None
@@ -55,6 +63,7 @@ class RouteProfile:
             "name": self.name,
             "model_path": str(self.model_path),
             "model_filename": self.model_path.name,
+            "mmproj_path": str(self.mmproj_path) if self.mmproj_path else None,
             "prompt": self.prompt.model_dump(mode="json") if self.prompt else None,
             "size_gb": size_gb,
             # Filled in from the route's deployment by the control plane.
@@ -86,6 +95,19 @@ def infer_quantization(filename: str) -> str:
         flags=re.IGNORECASE,
     )
     return match.group(0).upper() if match else "GGUF"
+
+
+def _projector_path(value: Any, model: Path) -> Path | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ProfileError("Projector path must be an absolute .gguf file or null")
+    path = Path(value)
+    if not path.is_absolute() or path.suffix.lower() != ".gguf":
+        raise ProfileError("Projector path must be an absolute .gguf file or null")
+    if path.resolve() == model.resolve():
+        raise ProfileError("Projector and model must be different files")
+    return path
 
 
 class ProfileStore:
@@ -133,6 +155,7 @@ class ProfileStore:
             else None,
             notes=str(payload.get("notes") or ""),
             modified_at=path.stat().st_mtime,
+            mmproj_path=_projector_path(payload.get("mmproj_path"), Path(model_path)),
         )
 
     def list(self) -> list[RouteProfile]:
@@ -149,6 +172,8 @@ class ProfileStore:
         if not profile.routable:
             raise ProfileError(
                 f"Route {profile_id!r} does not point to a readable GGUF model"
+                " and projector; missing files: "
+                + ", ".join(str(path) for path in profile.missing_paths)
             )
         return profile
 
@@ -160,12 +185,14 @@ class ProfileStore:
         model_path: str,
         prompt: PromptPolicy | dict[str, Any] | None = None,
         notes: str = "",
+        mmproj_path: str | None = None,
     ) -> RouteProfile:
         model = Path(model_path)
         if not model.is_absolute():
             raise ProfileError("Model path must be absolute")
         if model.suffix.lower() != ".gguf":
             raise ProfileError("Model path must end in .gguf")
+        projector = _projector_path(mmproj_path, model)
         prompt_policy = (
             prompt
             if isinstance(prompt, PromptPolicy)
@@ -181,6 +208,8 @@ class ProfileStore:
         }
         if prompt_policy:
             payload["prompt"] = prompt_policy.model_dump(mode="json")
+        if projector is not None:
+            payload["mmproj_path"] = str(projector)
         path = self._path(profile_id)
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

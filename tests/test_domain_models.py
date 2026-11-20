@@ -122,6 +122,45 @@ def test_llamacpp_adapter_compiles_an_explicit_asymmetric_gpu_plan() -> None:
     assert "--context-shift" in command
     assert "--no-ui" in command
     assert command[-4:] == ("--n-predict", "2048", "--reasoning-effort", "low")
+    assert "--mmproj" not in command
+
+
+@pytest.mark.parametrize("task", ["chat", "vision"])
+def test_multimodal_adapter_requires_and_launches_projector(task: str) -> None:
+    payload = manifest().model_dump()
+    payload["task"] = task
+    payload["capabilities"]["vision"] = True
+    payload["artifacts"]["mmproj"] = {"filename": "mmproj.gguf"}
+    payload["required_engine_capabilities"] = ["multimodal", "vision"]
+    model = ModelManifest.model_validate(payload)
+    adapter = LlamaCppAdapter(Path("/worker"), backend="cuda", devices={0: "CUDA0", 1: "CUDA1"})
+    artifacts = {"model": Path("/models/model.gguf")}
+    with pytest.raises(ValueError, match="resolved mmproj"):
+        adapter.compile(model, llama_deployment(), artifacts, host="127.0.0.1", port=5002)
+    artifacts["mmproj"] = Path("/models/mmproj.gguf")
+    spec = adapter.compile(model, llama_deployment(), artifacts, host="127.0.0.1", port=5002)
+    assert spec.arguments[spec.arguments.index("--mmproj") + 1] == str(artifacts["mmproj"])
+
+
+@pytest.mark.parametrize("projector", [Path("relative.gguf"), Path("/models/model.gguf")])
+def test_multimodal_adapter_rejects_invalid_artifacts(projector: Path) -> None:
+    payload = manifest().model_dump()
+    payload["artifacts"]["mmproj"] = {"filename": "mmproj.gguf"}
+    adapter = LlamaCppAdapter(Path("/worker"), backend="cuda", devices={0: "CUDA0", 1: "CUDA1"})
+    with pytest.raises(ValueError, match="absolute|different files"):
+        adapter.compile(
+            ModelManifest.model_validate(payload), llama_deployment(),
+            {"model": Path("/models/model.gguf"), "mmproj": projector}, host="127.0.0.1", port=5002,
+        )
+
+
+@pytest.mark.parametrize("flag", ["--mmproj", "--mmproj-url", "-mm", "-mmu", "--no-mmproj", "--no-mmproj-auto", "--mmproj-auto"])
+@pytest.mark.parametrize("equals", [False, True])
+def test_projector_launch_cannot_be_overridden(flag: str, equals: bool) -> None:
+    from engrai_server.engines.llamacpp import validate_extra_arguments
+
+    with pytest.raises(ValueError, match="ENGRAI-owned"):
+        validate_extra_arguments([f"{flag}=/other.gguf"] if equals else [flag, "/other.gguf"])
 
 
 def test_llamacpp_adapter_rejects_unresolved_or_ambiguous_placement() -> None:

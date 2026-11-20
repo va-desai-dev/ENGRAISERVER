@@ -21,6 +21,8 @@ interface FormState {
   name: string;
   modelPath: string;
   selected: string;
+  mmprojPath: string;
+  projectorSelected: string;
   notes: string;
   backend: Backend;
   devices: string;
@@ -44,6 +46,7 @@ interface FormState {
 
 const BLANK: FormState = {
   id: "", name: "", modelPath: "", selected: "", notes: "",
+  mmprojPath: "", projectorSelected: "",
   backend: "auto", devices: "", gpuLayers: "auto", splitMode: "layer", mainGpu: "", tensorSplit: "",
   context: "32768", kvCache: "q8_0", flashAttention: true,
   kvOffload: true, contextShift: true, cacheReuse: "256", parallelSlots: "1",
@@ -161,6 +164,10 @@ export function ProfileEditor({ profileId, onClose }: Props) {
             modelPath: profile.model_path,
             selected: discovery.models.some((model) => model.path === profile.model_path)
               ? profile.model_path : CUSTOM,
+            mmprojPath: profile.mmproj_path ?? "",
+            projectorSelected: !profile.mmproj_path ? ""
+              : discovery.models.some((model) => model.kind === "projector" && model.path === profile.mmproj_path)
+                ? profile.mmproj_path : CUSTOM,
             notes: profile.notes,
             template: profile.prompt?.template ?? imported.template ?? "jinja",
             thinking: profile.prompt?.thinking ?? imported.thinking ?? true,
@@ -199,9 +206,11 @@ export function ProfileEditor({ profileId, onClose }: Props) {
     setError("");
     try {
       const modelPath = form.selected === CUSTOM ? form.modelPath : form.selected;
+      const projectorPath = form.projectorSelected === CUSTOM ? form.mmprojPath.trim() : form.projectorSelected;
       const result = await api.saveProfile(form.id, {
         name: form.name,
         model_path: modelPath,
+        mmproj_path: projectorPath || null,
         notes: form.notes,
         prompt: { template: form.template, adapter: "auto", thinking: form.thinking },
         deployment: {
@@ -269,7 +278,7 @@ export function ProfileEditor({ profileId, onClose }: Props) {
             <select data-testid="model-select" value={form.selected} required
               onChange={(event) => set("selected", event.target.value)}>
               <option value="">Select a file…</option>
-              {library.map((model) => <option key={model.path} value={model.path}>
+              {library.filter((model) => model.kind !== "projector").map((model) => <option key={model.path} value={model.path}>
                 {model.filename} — {shortPath(model.path, 3)}
               </option>)}
               <option value={CUSTOM}>Enter an absolute file path…</option>
@@ -278,6 +287,22 @@ export function ProfileEditor({ profileId, onClose }: Props) {
           {form.selected === CUSTOM && <Field label="Absolute Path" wide>
             <input value={form.modelPath} placeholder="/path/to/model.gguf"
               onChange={(event) => set("modelPath", event.target.value)} />
+          </Field>}
+          <Field label="Multimodal projector (optional)" wide
+            hint="Choose the matching mmproj GGUF for image, audio, or video input supported by this model.">
+            <select data-testid="projector-select" value={form.projectorSelected}
+              onChange={(event) => set("projectorSelected", event.target.value)}>
+              <option value="">None — text only</option>
+              {library.filter((model) => model.kind === "projector").map((model) => <option key={model.path} value={model.path}>
+                {model.filename} — {shortPath(model.path, 3)}
+              </option>)}
+              <option value={CUSTOM}>Enter an absolute file path…</option>
+            </select>
+          </Field>
+          {form.projectorSelected === CUSTOM && <Field label="Projector absolute path" wide>
+            <input data-testid="projector-path" value={form.mmprojPath} required
+              placeholder="/path/to/mmproj.gguf"
+              onChange={(event) => set("mmprojPath", event.target.value)} />
           </Field>}
           <Field label="Search Directories" wide hint="Host-local model roots; blank restores the default.">
             <div className="inline-field">

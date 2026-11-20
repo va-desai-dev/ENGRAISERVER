@@ -145,7 +145,10 @@ def supports(payload: Mapping[str, Any]) -> bool:
     llama-server's native handler, which parses them.
     """
 
-    if payload.get("tools") or payload.get("functions"):
+    if payload.get("tools") or payload.get("functions") or any(
+        payload.get(key) is not None
+        for key in ("tool_choice", "function_call", "parallel_tool_calls")
+    ):
         return False
     if payload.get("n") not in (None, 1) or payload.get("logprobs"):
         return False
@@ -155,6 +158,8 @@ def supports(payload: Mapping[str, Any]) -> bool:
     return all(
         isinstance(message, Mapping)
         and isinstance(message.get("role"), str)
+        and message["role"] not in {"tool", "function"}
+        and not any(message.get(key) for key in ("tool_calls", "tool_call_id", "function_call"))
         and _text_of(message.get("content")) is not None
         for message in messages
     )

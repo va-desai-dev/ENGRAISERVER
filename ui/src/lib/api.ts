@@ -155,6 +155,7 @@ export const api = {
     body: {
       name: string;
       model_path: string;
+      mmproj_path?: string | null;
       notes: string;
       prompt: { template: "metadata" | "jinja" | "none"; adapter: string; thinking: boolean };
       deployment: {

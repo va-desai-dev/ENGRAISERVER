@@ -162,6 +162,20 @@ def test_tool_and_image_requests_stay_on_the_native_handler() -> None:
     )
 
 
+@pytest.mark.parametrize("extra", [
+    {"tool_choice": "none"}, {"parallel_tool_calls": False}, {"function_call": "auto"},
+])
+def test_tool_controls_without_definitions_use_native_handler(extra: dict) -> None:
+    assert not chat.supports({"messages": [{"role": "user", "content": "hi"}], **extra})
+
+
+def test_empty_optional_tool_fields_preserve_text_rendering() -> None:
+    assert chat.supports({"tools": [], "functions": None, "tool_choice": None, "messages": [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "Hello", "tool_calls": [], "function_call": None},
+    ]})
+
+
 class OneChunkStream(httpx.AsyncByteStream):
     def __init__(self, content: bytes):
         self.content = content
@@ -347,13 +361,34 @@ async def test_non_streaming_chat_returns_a_split_message(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("extra", [
+    {"tools": [{"type": "function", "function": {"name": "weather"}}]},
+    {"messages": [
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "call_1", "type": "function", "function": {"name": "weather", "arguments": "{}"}},
+        ]},
+        {"role": "tool", "tool_call_id": "call_1", "content": "Sunny"},
+    ]},
+    {"messages": [{"role": "tool", "content": "Sunny", "tool_call_id": "call_1"}]},
+    {"messages": [{"role": "function", "name": "weather", "content": "Sunny"}]},
+    {"messages": [{"role": "assistant", "content": "", "function_call": {"name": "weather", "arguments": "{}"}}]},
+    {"messages": [{"role": "user", "content": [
+        {"type": "text", "text": "Describe this"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}},
+    ]}]},
+    {"messages": [{"role": "user", "content": [
+        {"type": "input_audio", "input_audio": {"data": "AA==", "format": "wav"}},
+    ]}]},
+])
 async def test_tool_requests_still_proxy_to_native_chat(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra: dict
 ) -> None:
     paths: list[str] = []
+    forwarded: list[dict] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         paths.append(request.url.path)
+        forwarded.append(json.loads(request.content))
         return httpx.Response(200, stream=OneChunkStream(b'{"ok": true}'))
 
     control = control_plane(tmp_path, handler)
@@ -361,7 +396,7 @@ async def test_tool_requests_still_proxy_to_native_chat(
     request = {
         "model": "gemma",
         "messages": [{"role": "user", "content": "weather?"}],
-        "tools": [{"type": "function", "function": {"name": "weather"}}],
+        **extra,
     }
 
     _, stream = await control.forward_openai(
@@ -370,4 +405,6 @@ async def test_tool_requests_still_proxy_to_native_chat(
     [chunk async for chunk in stream]
 
     assert paths == ["/v1/chat/completions"]
+    assert forwarded == [request]
+    assert not control.generation_lock.locked()
     await control.client.aclose()

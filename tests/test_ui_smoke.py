@@ -823,6 +823,55 @@ def test_meters_clear_on_sign_out(page: Page) -> None:
 # ── Route editor ──────────────────────────────────────────────────────────
 
 
+@pytest.mark.parametrize("custom", [False, True])
+def test_projector_picker_round_trip_and_detach(page: Page, tmp_path, custom: bool) -> None:
+    from playwright.sync_api import expect
+
+    model = tmp_path / "model.gguf"
+    projector = tmp_path / "mmproj.gguf"
+    model.write_bytes(b"GGUF")
+    projector.write_bytes(b"GGUF")
+    discovered = [
+        {"path": str(model), "filename": model.name, "kind": "text"},
+        {"path": str(projector), "filename": projector.name, "kind": "projector"},
+    ]
+    page.route("**/control/discovery/models", lambda route: route.fulfill(json={
+        "models": discovered if not custom else discovered[:1],
+        "library": {"model_search_roots": [str(tmp_path)]},
+    }))
+    page.set_viewport_size({"width": 390 if custom else 1280, "height": 900})
+    open_new_profile(page)
+    expect(page.get_by_test_id("projector-select")).to_have_value("")
+    assert projector.name not in page.get_by_test_id("model-select").inner_text()
+    route_id = f"vision-picker-{'custom' if custom else 'library'}"
+    page.get_by_test_id("route-id").fill(route_id)
+    page.get_by_test_id("model-select").select_option(str(model))
+    page.get_by_test_id("projector-select").select_option("__custom__" if custom else str(projector))
+    if custom:
+        page.get_by_test_id("projector-path").fill(str(projector))
+
+    def save():
+        with page.expect_response(lambda response: response.url.endswith(f"/control/profiles/{route_id}")
+                                  and response.request.method == "PUT") as response:
+            page.get_by_role("button", name="Save deployment", exact=True).click()
+        assert response.value.status == 200, response.value.text()
+        expect(page.locator("#profile-form")).to_have_count(0)
+        return response.value.json()["profile"]
+
+    assert save()["mmproj_path"] == str(projector)
+    card = page.locator("article.card").filter(has=page.locator("code", has_text=route_id))
+    card.get_by_role("button", name="Edit", exact=True).click()
+    expect(page.get_by_test_id("projector-select")).to_have_value("__custom__" if custom else str(projector))
+    if custom:
+        expect(page.get_by_test_id("projector-path")).to_have_value(str(projector))
+    # Saving an unrelated setting retains the selected projector.
+    page.get_by_test_id("context").fill("8192")
+    assert save()["mmproj_path"] == str(projector)
+    card.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_test_id("projector-select").select_option("")
+    assert save()["mmproj_path"] is None
+
+
 def test_model_picker_needs_no_typing(page: Page) -> None:
     """A datalist matched on the option value, which had to be the full path.
 

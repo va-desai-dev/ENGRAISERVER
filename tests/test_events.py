@@ -336,3 +336,50 @@ def test_typed_deployment_is_compiled_by_the_server(client, tmp_path) -> None:
     assert deployment["engine"] == "llama.cpp"
     assert deployment["compute"]["backend"] == "cuda"
     assert deployment["memory"]["context"] == 16384
+
+
+def test_profile_api_preserves_projector_for_older_clients(client, tmp_path) -> None:
+    admin = {"Authorization": f"Bearer {admin_token(client)}"}
+    model = tmp_path / "model.gguf"
+    projector = tmp_path / "mmproj.gguf"
+    model.write_bytes(b"GGUF")
+    projector.write_bytes(b"GGUF")
+    body = {"name": "Vision", "model_path": str(model),
+            "deployment": {"memory": {"context": 4096}}}
+    url = "/control/profiles/vision"
+    saved = client.put(url, json={**body, "mmproj_path": str(projector)}, headers=admin)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["profile"]["mmproj_path"] == str(projector)
+
+    # The existing frontend omits mmproj_path when saving other profile settings.
+    updated = client.put(url, json={**body, "name": "Renamed"}, headers=admin)
+    assert updated.status_code == 200, updated.text
+    profile = client.get(url, headers=admin).json()["profile"]
+    assert profile["name"] == "Renamed"
+    assert profile["mmproj_path"] == str(projector)
+
+    invalid = client.put(url, json={**body, "mmproj_path": "relative.gguf"}, headers=admin)
+    assert invalid.status_code == 400
+    assert client.get(url, headers=admin).json()["profile"]["mmproj_path"] == str(projector)
+
+    detached = client.put(url, json={**body, "mmproj_path": None}, headers=admin)
+    assert detached.status_code == 200, detached.text
+    assert detached.json()["profile"]["mmproj_path"] is None
+    assert detached.json()["profile"]["routable"]
+
+
+def test_chat_reports_missing_projector_as_client_error(client, tmp_path) -> None:
+    admin = {"Authorization": f"Bearer {admin_token(client)}"}
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUF")
+    saved = client.put("/control/profiles/vision", headers=admin, json={
+        "name": "Vision", "model_path": str(model), "mmproj_path": str(tmp_path / "missing.gguf"),
+        "deployment": {"memory": {"context": 4096}},
+    })
+    assert saved.status_code == 200, saved.text
+    assert not saved.json()["profile"]["routable"]
+    response = client.post("/v1/chat/completions", headers={"Authorization": "Bearer eng-events-test-key"},
+                           json={"model": "vision", "messages": [{"role": "user", "content": "Hi"}]})
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["type"] == "invalid_request_error"
+    assert "missing.gguf" in response.json()["error"]["message"]

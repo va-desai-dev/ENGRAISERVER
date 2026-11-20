@@ -37,6 +37,7 @@ export interface ModelProfile {
   name: string;
   model_path: string;
   model_filename: string;
+  mmproj_path?: string | null;
   prompt: {
     template: "metadata" | "jinja" | "none";
     adapter: string;

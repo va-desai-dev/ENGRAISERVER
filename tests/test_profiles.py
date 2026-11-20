@@ -29,6 +29,62 @@ def test_route_round_trip(tmp_path: Path) -> None:
     assert payload["schema_version"] == 2
     assert "arguments" not in payload
     assert saved.public_dict()["quantization"] == "Q4_K_M"
+    assert saved.mmproj_path is None
+    assert saved.public_dict()["mmproj_path"] is None
+    assert "mmproj_path" not in payload
+
+
+def test_projector_round_trip_and_missing_file(tmp_path: Path) -> None:
+    model = tmp_path / "model.gguf"
+    projector = tmp_path / "mmproj.gguf"
+    model.write_bytes(b"gguf")
+    projector.write_bytes(b"gguf")
+    store = ProfileStore(tmp_path / "routes", [])
+    saved = store.save("vision", name="Vision", model_path=str(model), mmproj_path=str(projector))
+
+    assert saved.mmproj_path == projector
+    assert saved.public_dict()["mmproj_path"] == str(projector)
+    assert store.resolve("vision").routable
+    projector.unlink()
+    assert store.get("vision").missing_paths == [projector]
+    assert not store.get("vision").routable
+    with pytest.raises(ProfileError, match="mmproj.gguf"):
+        store.resolve("vision")
+
+    detached = store.save("vision", name="Vision", model_path=str(model), mmproj_path=None)
+    assert detached.routable
+    assert detached.mmproj_path is None
+
+
+@pytest.mark.parametrize("value", ["mmproj.gguf", "/models/mmproj.bin", "", 12, {}, []])
+def test_invalid_projector_does_not_overwrite_route(tmp_path: Path, value: object) -> None:
+    store = ProfileStore(tmp_path / "routes", [])
+    saved = store.save("text", name="Text", model_path=str(tmp_path / "model.gguf"))
+    before = saved.path.read_bytes()
+    with pytest.raises(ProfileError, match="Projector path"):
+        store.save("text", name="Changed", model_path=str(saved.model_path), mmproj_path=value)
+    assert saved.path.read_bytes() == before
+
+
+def test_projector_cannot_alias_model(tmp_path: Path) -> None:
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"gguf")
+    alias = tmp_path / "mmproj.gguf"
+    alias.symlink_to(model)
+    store = ProfileStore(tmp_path / "routes", [])
+    with pytest.raises(ProfileError, match="different files"):
+        store.save("vision", name="Vision", model_path=str(model), mmproj_path=str(alias))
+
+
+def test_invalid_projector_in_saved_profile_is_rejected(tmp_path: Path) -> None:
+    store = ProfileStore(tmp_path / "routes", [])
+    saved = store.save("text", name="Text", model_path=str(tmp_path / "model.gguf"))
+    payload = json.loads(saved.path.read_text())
+    payload["mmproj_path"] = "relative.gguf"
+    saved.path.write_text(json.dumps(payload))
+    with pytest.raises(ProfileError, match="Projector path"):
+        store.get("text")
+    assert store.list() == []
 
 
 @pytest.mark.parametrize("schema_version", [None, 1, 999])
