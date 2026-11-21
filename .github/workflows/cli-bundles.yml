@@ -53,7 +53,7 @@ jobs:
           - runner: ubuntu-22.04-arm
             target: linux-aarch64-cpu
             backend: cpu
-          - runner: macos-14
+          - runner: macos-15-arm
             target: macos-aarch64-metal
             backend: metal
           - runner: macos-15-intel

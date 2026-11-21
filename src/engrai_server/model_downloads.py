@@ -301,6 +301,45 @@ class ModelDownloadManager:
         with self._lock:
             return bool(self._tasks[task_id].get("cancel_requested"))
 
+    def _progress_class(self, task_id: str, completed_bytes: int, file_size: int) -> type[QuietTqdm]:
+        manager = self
+
+        class DownloadProgress(QuietTqdm):
+            """Report file bytes even when terminal progress bars are disabled."""
+
+            def __init__(self, *args: Any, **kwargs: Any):
+                # Xet may also create a network-transfer bar. Its compressed
+                # bytes must not be counted as reconstructed model-file bytes.
+                self._file_progress = not str(kwargs.get("name", "")).endswith(".transfer")
+                super().__init__(*args, **kwargs)
+                self._report()
+
+            def _report(self) -> None:
+                if not self._file_progress:
+                    return
+                with manager._lock:
+                    record = manager._tasks[task_id]
+                    if record["status"] not in {"downloading", "cancelling"}:
+                        return
+                    record.update(
+                        bytes_completed=completed_bytes + min(file_size, max(0, int(self.n))),
+                        updated_at=time.time(),
+                    )
+                    # Polling reads this in-memory record. Persist at file and
+                    # state transitions, not on every downloaded chunk.
+
+            def update(self, n: float = 1) -> None:
+                # tqdm.update() does not advance n when disable=True.
+                self.n += n
+                self._report()
+
+            def reset(self, total: float | None = None) -> None:
+                super().reset(total=total)
+                self.n = 0
+                self._report()
+
+        return DownloadProgress
+
     async def _run(self, task_id: str, request: ModelPullRequest) -> None:
         try:
             self._update(task_id, status="resolving")
@@ -328,6 +367,7 @@ class ModelDownloadManager:
                     cache_dir=self.cache_dir,
                     force_download=request.force_download,
                     token=None,
+                    tqdm_class=self._progress_class(task_id, completed_bytes, int(item.file_size or 0)),
                 )
                 completed_bytes += int(item.file_size or 0)
                 downloaded.append((str(item.filename), str(local_path)))

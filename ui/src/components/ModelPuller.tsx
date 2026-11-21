@@ -159,8 +159,9 @@ export function ModelPuller() {
   const active = status?.active;
   const latest = status?.tasks[0] ?? null;
   const shown = active ?? latest;
-  const progress = active && active.files_total
-    ? Math.round(active.files_completed / active.files_total * 100)
+  const progress = shown && shown.bytes_total > 0
+    ? Math.min(shown.status === "completed" ? 100 : 99.9,
+      Math.floor(shown.bytes_completed / shown.bytes_total * 1000) / 10)
     : 0;
 
   return (
@@ -288,10 +289,13 @@ export function ModelPuller() {
           <div>
             <strong>{shown.repo_id}</strong>
             <small>
-              {shown.status}{active?.files_total
-                ? ` · ${active.files_completed}/${active.files_total} Files · ${progress}%`
+              {shown.status}{shown.files_total
+                ? ` · ${shown.files_completed}/${shown.files_total} Files · ${progress}%`
                 : ""}
             </small>
+            {shown.bytes_total > 0 && (
+              <small>{bytes(shown.bytes_completed)} / {bytes(shown.bytes_total)}</small>
+            )}
           </div>
           {active && (
             <Button

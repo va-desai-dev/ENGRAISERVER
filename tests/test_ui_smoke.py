@@ -160,6 +160,28 @@ def sign_in(page: Page) -> None:
     page.wait_for_selector(".hero", timeout=15000)
 
 
+def test_model_pull_progress_advances_before_a_file_completes(page: Page):
+    from playwright.sync_api import expect
+
+    task = {
+        "id": "progress-test", "repo_id": "example/model-GGUF", "status": "downloading",
+        "files_total": 1, "files_completed": 0, "bytes_total": 1024, "bytes_completed": 256,
+        "error": None,
+    }
+    page.route("**/control/model-pulls", lambda route: route.fulfill(json={
+        "destination": "/tmp/test-hub", "authenticated": False,
+        "active": task if task["status"] == "downloading" else None, "tasks": [task],
+    }))
+    sign_in(page)
+    indicator = page.get_by_test_id("model-puller").get_by_role("status")
+    expect(indicator).to_contain_text("0/1 Files · 25%")
+    expect(indicator).to_contain_text("256.0 B / 1.0 KiB")
+    task["bytes_completed"] = 768
+    expect(indicator).to_contain_text("0/1 Files · 75%")
+    task.update(status="completed", bytes_completed=1024, files_completed=1)
+    expect(indicator).to_contain_text("completed · 1/1 Files · 100%")
+
+
 @pytest.mark.parametrize("width", [320, 390, 1280])
 def test_gguf_browser_selects_exact_variant_and_all_is_opt_in(page: Page, width: int):
     from playwright.sync_api import expect

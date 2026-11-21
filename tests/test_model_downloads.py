@@ -166,3 +166,71 @@ def test_restart_marks_an_active_pull_interrupted(tmp_path: Path) -> None:
     record = manager.status()["tasks"][0]
     assert record["status"] == "interrupted"
     assert "restarted" in record["error"]
+
+
+@pytest.mark.asyncio
+async def test_pull_reports_bytes_before_file_finishes_with_resume_and_cached_files(tmp_path: Path) -> None:
+    observed = []
+    bars = []
+
+    def fake_file(**kwargs):
+        if kwargs["filename"] == "model.gguf":
+            # A resumed HTTP transfer, with terminal output disabled.
+            with kwargs["tqdm_class"](total=24, initial=6, disable=True) as progress:
+                bars.append(progress)
+                observed.append(manager.status()["active"])
+                progress.update(6)
+                observed.append(manager.status()["active"])
+                # A server ignoring Range can restart the transfer.
+                progress.update(-12)
+                observed.append(manager.status()["active"])
+                progress.update(24)
+                observed.append(manager.status()["active"])
+        return str(tmp_path / "hub" / "snapshots" / ("a" * 40) / kwargs["filename"])
+
+    manager = ModelDownloadManager(
+        tmp_path / "hub", tmp_path / "state.json",
+        snapshot_fn=lambda **_: [dry_file("config.json", size=8, cached=True), dry_file("model.gguf", size=24)],
+        file_fn=fake_file,
+    )
+    task = await manager.start(request())
+    await manager._runners[task["id"]]
+
+    record = manager.status()["tasks"][0]
+    assert record["status"] == "completed", record["error"]
+    assert [item["bytes_completed"] for item in observed] == [14, 20, 8, 32]
+    assert all(item["files_completed"] == 1 and item["status"] == "downloading" for item in observed)
+    assert record["bytes_completed"] == record["bytes_total"] == 32
+    # Late callbacks cannot change a finished task.
+    bars[0].update(-24)
+    assert manager.status()["tasks"][0] == record
+
+
+@pytest.mark.asyncio
+async def test_pull_xet_progress_does_not_double_count_transfer_bytes(tmp_path: Path) -> None:
+    observed = []
+
+    def fake_file(**kwargs):
+        cls = kwargs["tqdm_class"]
+        with cls(total=16, name="huggingface_hub.xet_get") as reconstruction:
+            with cls(total=16, name="huggingface_hub.xet_get.transfer") as transfer:
+                reconstruction.update(4)
+                transfer.update(12)
+                observed.append(manager.status()["active"]["bytes_completed"])
+                reconstruction.update(4)
+                observed.append(manager.status()["active"]["bytes_completed"])
+                raise OSError("transfer interrupted")
+
+    manager = ModelDownloadManager(
+        tmp_path / "hub", tmp_path / "state.json",
+        snapshot_fn=lambda **_: [dry_file()], file_fn=fake_file,
+    )
+    task = await manager.start(request())
+    await manager._runners[task["id"]]
+
+    assert observed == [4, 8]
+    record = manager.status()["tasks"][0]
+    assert record["status"] == "failed"
+    assert record["bytes_completed"] == 8
+    assert record["files_completed"] == 0
+    assert json.loads(manager.state_path.read_text())["tasks"][0]["bytes_completed"] == 8
