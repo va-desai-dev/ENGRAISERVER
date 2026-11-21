@@ -75,7 +75,7 @@ export function ActiveRoute() {
         <div className="status-copy">
           <span className="eyebrow">Engine</span>
           <strong className="status-value">
-            {snapshot?.engine.version ? `v${snapshot.engine.version.replace(/^v/i, "")}` : engine.label}
+            {snapshot?.engine.version || engine.label}
           </strong>
         </div>
       </article>
