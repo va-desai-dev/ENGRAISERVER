@@ -274,3 +274,26 @@ def test_initials_fall_back_sensibly(name: str, email: str, expected: str) -> No
     from engrai_server.credentials import derive_initials
 
     assert derive_initials(name, email) == expected
+
+
+def test_local_token_opens_api_and_admin_but_not_display(tmp_path):
+    from fastapi import HTTPException
+
+    from engrai_server.auth import build_dependencies
+    from engrai_server.credentials import CredentialStore
+    from engrai_server.local_token import local_token_path, read_local_token, write_local_token
+
+    path = local_token_path(tmp_path / "credentials.json")
+    secret = write_local_token(path)
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert read_local_token(path) == secret
+    store = CredentialStore(tmp_path / "credentials.json")
+    api, admin, display = build_dependencies(store, lambda: secret)
+    assert api(f"Bearer {secret}") == secret
+    assert admin(f"Bearer {secret}") == secret
+    for dependency, value in ((display, secret), (api, "wrong"), (admin, "")):
+        with pytest.raises(HTTPException):
+            dependency(f"Bearer {value}")
+    api_off, _, _ = build_dependencies(store, lambda: None)
+    with pytest.raises(HTTPException):
+        api_off("Bearer ")

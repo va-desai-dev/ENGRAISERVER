@@ -53,24 +53,44 @@ Standalone archives embed both runtimes, and a fresh installation discovers them
 ## Terminal chat and profile control
 
 Use the existing `engrai-server` command to talk to a running gateway without
-opening the web interface. Use a saved text route ID from `engrai-server routes`:
+opening the web interface. Use a saved text route ID from `engrai-server routes`.
+On the gateway's own host, logged in as the account that runs the service
+(including over SSH), no credentials are needed:
 
 ```bash
-export ENGRAI_API_KEY='your-client-api-key'
-export ENGRAI_ADMIN_TOKEN='your-admin-password-or-session-token'
 engrai-server load my-profile
 engrai-server chat my-profile
 engrai-server unload
 ```
 
-`chat` needs only the client API key. Its first message lets the gateway load
+Each time it starts, the gateway writes a fresh token to `local-cli.token` next
+to `credentials.json`, readable only by the service account, and removes it on
+shutdown. The CLI uses that token when it targets a gateway on loopback and was
+given no explicit credential. A user who can read that file can already read
+the credential store, so an API key would add no protection there. Loopback
+connections alone are not trusted, because a reverse proxy such as cloudflared
+also connects from `127.0.0.1`.
+
+From another machine, or as a different local user, pass credentials:
+
+```bash
+export ENGRAI_SERVER_URL='https://your-gateway'
+export ENGRAI_API_KEY='your-client-api-key'
+export ENGRAI_ADMIN_TOKEN='your-admin-password-or-session-token'
+```
+
+Remotely, `chat` needs only the client API key. Its first message lets the gateway load
 the requested profile through the normal inference path; a separate `load` is
 optional. `load` and `unload` need the administrator password or session token.
 These controls operate on the gateway's shared text worker, so switching or
 unloading a profile also affects other clients using that worker. They do not
 stop the gateway or replace its runtime.
 
-Replies stream as they arrive. Each terminal chat keeps its own conversation
+Replies stream as they arrive. When the model thinks, its reasoning is shown
+first in muted text, as the gateway separates it into `reasoning_content`. It is
+never added to the conversation history. Pass `--hide-thinking` or use
+`/think` to hide it; it is also omitted when stdout is redirected, and
+`NO_COLOR` turns off the muting. Each terminal chat keeps its own conversation
 in memory and sends the full message history with each request. Nothing is
 saved to disk or resumed after exit. Failed or interrupted replies are excluded
 from subsequent context; already printed partial output may remain visible.
@@ -83,6 +103,7 @@ outgrows the profile's context window.
 | `/load PROFILE` | Load/select a profile; changing profiles clears this chat's history. Requires admin credentials. |
 | `/unload` | Unload the shared text worker and clear this chat. Use `/load PROFILE` to continue. Requires admin credentials. |
 | `/clear` | Start fresh while retaining the `--system` instruction. |
+| `/think` | Show or hide the model's reasoning for later replies. |
 | `/help` | Show available commands. |
 | `/exit` or `/quit` | Exit without unloading the model or stopping the server. |
 

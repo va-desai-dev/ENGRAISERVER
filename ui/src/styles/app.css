@@ -295,10 +295,21 @@
 /* ── Server status rail ────────────────────────────────────────────────── */
 
 .status-rail {
+  display: grid;
+  gap: var(--s3);
+  min-width: 0;
+}
+
+.status-row {
   display: flex;
   flex-wrap: wrap;
   gap: var(--s3);
   min-width: 0;
+}
+
+.status-row-models {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .status-card {
@@ -313,7 +324,7 @@
   border-radius: var(--r-sm);
   background: rgba(22, 11, 14, 0.72);
 }
-.status-card-current { flex: 1.45 1 240px; justify-content: space-between; }
+.status-card-current { flex: 1 1 280px; justify-content: space-between; }
 .status-copy { min-width: 0; }
 .status-copy .eyebrow,
 .status-value {
@@ -338,6 +349,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Clip only the model name above; the dot's halo and sonar ring extend
+   beyond the text row in every direction. */
+.status-card-current .status-value { overflow: visible; }
 .status-orb {
   width: 32px;
   height: 32px;

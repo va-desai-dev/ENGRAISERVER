@@ -50,6 +50,10 @@ def add_client_commands(subparsers: Any, add_shared: Any) -> None:
             parser.add_argument("--api-key", help="client API key (or ENGRAI_API_KEY)")
             parser.add_argument("--system", help="system instruction for this chat")
             parser.add_argument("--no-stream", action="store_true", help="print each reply in full")
+            parser.add_argument(
+                "--hide-thinking", action="store_true",
+                help="do not show the model's reasoning (shown muted by default on a terminal)",
+            )
         else:
             parser.add_argument("--json", action="store_true", help="print the gateway response")
         add_shared(parser, client=True)
@@ -75,7 +79,10 @@ def gateway_url(args: argparse.Namespace, settings: Any) -> str:
 
 def bearer(secret: str | None, variable: str) -> dict[str, str]:
     if not secret or not secret.strip():
-        raise ClientError(f"Set {variable} or pass its corresponding credential flag.")
+        raise ClientError(
+            f"Set {variable} or pass its corresponding credential flag "
+            "(not needed on the gateway's own host while it is running)."
+        )
     return {"Authorization": f"Bearer {secret.strip()}"}
 
 
@@ -132,10 +139,48 @@ def sse_data(response: httpx.Response) -> Iterator[str]:
         yield "\n".join(data)
 
 
+DIM = "\033[2m"
+RESET = "\033[0m"
+
+
+class ThinkingPrinter:
+    """Print reasoning muted, like ollama, and keep it out of the answer.
+
+    Reasoning is only for the person watching: it is never committed to the
+    chat history, and it is never written to a redirected stdout, so piping
+    a reply into a file or another program yields only the answer.
+    """
+
+    def __init__(self, show: bool):
+        self.show = show and sys.stdout.isatty()
+        self.dim = self.show and not os.environ.get("NO_COLOR")
+        self.thinking = False
+
+    def reasoning(self, text: str) -> None:
+        if not self.show or not text:
+            return
+        if not self.thinking:
+            self.thinking = True
+            if self.dim:
+                print(DIM, end="")
+        print(text, end="", flush=True)
+
+    def content(self, text: str) -> None:
+        self.end()
+        print(text, end="", flush=True)
+
+    def end(self) -> None:
+        if self.thinking:
+            self.thinking = False
+            print(RESET if self.dim else "", end="")
+            print("\n", flush=True)  # one blank line between thinking and answer
+
+
 class ChatSession:
-    def __init__(self, profile: str, system: str | None = None):
+    def __init__(self, profile: str, system: str | None = None, *, show_thinking: bool = True):
         self.profile: str | None = profile
         self.system = system
+        self.show_thinking = show_thinking
         self.clear()
 
     def clear(self) -> None:
@@ -149,25 +194,35 @@ class ChatSession:
         pending = [*self.messages, {"role": "user", "content": prompt}]
         payload = {"model": self.profile, "messages": pending, "stream": stream}
         headers = bearer(key, "ENGRAI_API_KEY")
+        printer = ThinkingPrinter(self.show_thinking)
         if stream:
-            answer = self._stream(client, headers, payload)
+            answer = self._stream(client, headers, payload, printer)
         else:
             result = json_object(client.post("v1/chat/completions", headers=headers, json=payload))
             try:
-                answer = result["choices"][0]["message"]["content"]
+                message = result["choices"][0]["message"]
+                answer = message["content"]
                 if not isinstance(answer, str):
                     raise TypeError
             except (KeyError, IndexError, TypeError) as exc:
                 raise ClientError("Gateway returned no text assistant message.") from exc
-            print(answer)
+            reasoning = message.get("reasoning_content")
+            if isinstance(reasoning, str):
+                printer.reasoning(reasoning.strip())
+            printer.content(answer)
+            print()
         # Failed requests, interrupted replies and partial streams never become
         # context for the next turn. Each process owns its own message list.
         self.messages = [*pending, {"role": "assistant", "content": answer}]
 
     @staticmethod
-    def _stream(client: httpx.Client, headers: dict[str, str], payload: dict[str, Any]) -> str:
+    def _stream(
+        client: httpx.Client, headers: dict[str, str], payload: dict[str, Any],
+        printer: ThinkingPrinter,
+    ) -> str:
         pieces: list[str] = []
         finished = False
+        had_reasoning = False
         try:
             with client.stream("POST", "v1/chat/completions", headers=headers, json=payload) as response:
                 check_response(response)
@@ -183,18 +238,31 @@ class ChatSession:
                         for choice in event.get("choices", []):
                             if choice.get("index", 0) != 0:
                                 continue
-                            content = choice.get("delta", {}).get("content")
+                            delta = choice.get("delta", {})
+                            reasoning = delta.get("reasoning_content")
+                            if reasoning is not None:
+                                if not isinstance(reasoning, str):
+                                    raise TypeError
+                                had_reasoning = True
+                                # Leading newlines after <think> just push the
+                                # muted block down; drop them before it starts.
+                                printer.reasoning(reasoning if printer.thinking else reasoning.lstrip("\n"))
+                            content = delta.get("content")
                             if content is not None:
                                 if not isinstance(content, str):
                                     raise TypeError
-                                pieces.append(content)
-                                print(content, end="", flush=True)
+                                if not pieces:
+                                    content = content.lstrip("\n") if had_reasoning else content
+                                if content or pieces:
+                                    pieces.append(content)
+                                    printer.content(content)
                             if choice.get("finish_reason") is not None:
                                 finished = True
                     except (ValueError, TypeError, AttributeError) as exc:
                         raise ClientError("Gateway returned an invalid chat stream; turn discarded.") from exc
             raise ClientError("Reply stream disconnected before [DONE]; turn discarded.")
         finally:
+            printer.end()  # never leave the terminal dimmed, even on Ctrl+C
             print()
 
 
@@ -203,6 +271,7 @@ CHAT_HELP = """/help           Show commands
 /load PROFILE   Load/select a profile; switching profiles clears history
 /unload         Unload the shared text worker and clear this chat
 /clear          Clear local history, retaining the system instruction
+/think          Show or hide the model's muted reasoning
 /exit, /quit    Exit; leave the server and loaded model running
 Ctrl+C cancels a reply; Ctrl+C at the prompt or Ctrl+D exits.
 """
@@ -215,6 +284,9 @@ def chat_command(line: str, session: ChatSession, client: httpx.Client, args: ar
         return False
     if command == "/help" and not argument:
         print(CHAT_HELP, file=sys.stderr)
+    elif command == "/think" and not argument:
+        session.show_thinking = not session.show_thinking
+        print(f"Thinking {'shown' if session.show_thinking else 'hidden'}.", file=sys.stderr)
     elif command == "/clear" and not argument:
         session.clear()
         print("Chat history cleared.", file=sys.stderr)
@@ -241,7 +313,7 @@ def chat_command(line: str, session: ChatSession, client: httpx.Client, args: ar
 
 def run_chat(client: httpx.Client, args: argparse.Namespace) -> int:
     bearer(args.api_key, "ENGRAI_API_KEY")
-    session = ChatSession(args.profile, args.system)
+    session = ChatSession(args.profile, args.system, show_thinking=not getattr(args, "hide_thinking", False))
     if not sys.stdin.isatty():
         prompt = sys.stdin.read()
         if not prompt.strip():
@@ -279,6 +351,19 @@ def run_chat(client: httpx.Client, args: argparse.Namespace) -> int:
             print(f"Error: {exc}", file=sys.stderr)
 
 
+def owner_token(base_url: str, settings: Any) -> str | None:
+    """The gateway's owner-only CLI token, but only for a gateway on this host.
+
+    Never sent to a remote --url: the token belongs to the local gateway, and
+    a different server has no business seeing it.
+    """
+    from .local_token import LOOPBACK_HOSTS, local_token_path, read_local_token
+
+    if httpx.URL(base_url).host.strip("[]") not in LOOPBACK_HOSTS:
+        return None
+    return read_local_token(local_token_path(settings.credentials_path))
+
+
 def command_client(args: argparse.Namespace) -> int:
     from .settings import get_settings
 
@@ -287,8 +372,17 @@ def command_client(args: argparse.Namespace) -> int:
     if args.command == "chat":
         args.api_key = args.api_key or os.environ.get("ENGRAI_API_KEY")
     try:
+        base_url = gateway_url(args, settings)
+        # Explicit credentials win; otherwise a local shell as the service
+        # owner is trusted, since it could read credentials.json anyway.
+        local = None
+        if not args.admin_token or (args.command == "chat" and not args.api_key):
+            local = owner_token(base_url, settings)
+        args.admin_token = args.admin_token or local
+        if args.command == "chat":
+            args.api_key = args.api_key or local
         with httpx.Client(
-            base_url=gateway_url(args, settings),
+            base_url=base_url,
             timeout=httpx.Timeout(args.timeout, connect=min(10, args.timeout)),
         ) as client:
             if args.command == "chat":

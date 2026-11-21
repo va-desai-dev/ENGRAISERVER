@@ -152,3 +152,92 @@ pre {
   white-space: nowrap;
   border: 0;
 }
+
+/* Telemetry Icon Badges */
+.telemetry-badge {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.telemetry-badge svg:not(.telemetry-reticle) {
+  width: 16px;
+  height: 16px;
+}
+
+.telemetry-badge-live {
+  color: #35ac14;
+  background: rgba(224, 82, 99, 0.12);
+  border: 1px solid rgba(224, 82, 99, 0.35);
+  box-shadow: inset 0 0 12px rgba(224, 82, 99, 0.14);
+}
+
+.telemetry-badge-warm {
+  color: #ec3e17;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.telemetry-badge-cold {
+  color: #6b7280;
+  background: rgba(107, 114, 128, 0.1);
+  border: 1px solid rgba(107, 114, 128, 0.25);
+}
+
+/* Rotating Dashed Reticle on Active Engine */
+.telemetry-reticle {
+  position: absolute;
+  inset: 1px;
+  width: calc(100% - 2px);
+  height: calc(100% - 2px);
+  opacity: 0.75;
+  animation: telemetry-spin 16s linear infinite;
+  pointer-events: none;
+}
+
+/* Pulse Glow when Lane is Busy */
+.telemetry-badge-warm.is-active {
+  animation: telemetry-breathe 1.6s ease-in-out infinite;
+}
+
+/* Add the sonar ring only while StatusDot is pulsing. */
+.status-card-current .status-value > .dot.is-pulsing::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  animation: telemetry-sonar 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* Interactive Power / Unload Button */
+.status-action {
+  transition: transform 0.18s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.status-action:not(:disabled):hover {
+  transform: scale(1.06);
+  box-shadow: 0 0 16px rgba(224, 82, 99, 0.45);
+}
+
+@keyframes telemetry-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Keep the sonar ring tight enough not to hit card borders */
+@keyframes telemetry-sonar {
+  0% { transform: scale(1); opacity: 0.85; }
+  100% { transform: scale(2.1); opacity: 0; }
+}
+
+@keyframes telemetry-breathe {
+  0%, 100% { box-shadow: 0 0 0 rgba(245, 158, 11, 0); }
+  50% { box-shadow: 0 0 14px rgba(245, 158, 11, 0.35); }
+}

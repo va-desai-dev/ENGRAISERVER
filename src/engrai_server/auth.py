@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import secrets
+from collections.abc import Callable
+
 from fastapi import Header, HTTPException, status
 
 from .credentials import CredentialStore
@@ -14,15 +17,23 @@ def extract_bearer(authorization: str | None) -> str:
     return ""
 
 
-def build_dependencies(store: CredentialStore):
+def build_dependencies(store: CredentialStore, local_token: Callable[[], str | None] = lambda: None):
     """Build the auth dependencies bound to one credential store.
 
     The store is mutable at runtime, so the dependencies close over the
-    instance rather than re-reading settings on each call.
+    instance rather than re-reading settings on each call. ``local_token``
+    returns the owner-only CLI token (see local_token.py), which satisfies
+    both the inference and the admin check, but never the display check.
     """
+
+    def is_local(token: str) -> bool:
+        expected = local_token()
+        return bool(token and expected and secrets.compare_digest(token, expected))
 
     def require_api_key(authorization: str | None = Header(default=None)) -> str:
         token = extract_bearer(authorization)
+        if is_local(token):
+            return token
         if not store.verify_api_key(token):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -64,7 +75,7 @@ def build_dependencies(store: CredentialStore):
         scripts can hit /control without logging in first.
         """
         token = extract_bearer(authorization)
-        if store.verify_session(token):
+        if store.verify_session(token) or is_local(token):
             return token
         # Do not spend a password-KDF operation on an empty Authorization
         # header. Besides being wasted work, it lets anonymous request floods

@@ -304,3 +304,85 @@ def test_chat_entrypoint_credentials_and_errors(monkeypatch, tmp_path, capsys, m
         assert output.out == "hello\n" and output.err == ""
     else:
         assert output.out == "" and "Error:" in output.err
+
+
+@pytest.mark.parametrize("url,sent", [
+    (None, True),
+    ("http://localhost:8400", True),
+    ("https://remote.test", False),
+])
+def test_chat_uses_owner_token_only_for_local_gateway(monkeypatch, tmp_path, capsys, url, sent):
+    from engrai_server.local_token import local_token_path, write_local_token
+    from engrai_server.settings import get_settings
+
+    monkeypatch.setenv("ENGRAI_HOME", str(tmp_path))
+    monkeypatch.delenv("ENGRAI_API_KEY", raising=False)
+    monkeypatch.delenv("ENGRAI_ADMIN_TOKEN", raising=False)
+    if url:
+        monkeypatch.setenv("ENGRAI_SERVER_URL", url)
+    else:
+        monkeypatch.delenv("ENGRAI_SERVER_URL", raising=False)
+    get_settings.cache_clear()
+    secret = write_local_token(local_token_path(get_settings().credentials_path))
+    monkeypatch.setattr("sys.stdin", io.StringIO("hello"))
+    real_client = httpx.Client
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers.get("authorization"))
+        return completion()
+
+    monkeypatch.setattr("engrai_server.terminal.httpx.Client", lambda **kwargs: real_client(
+        **kwargs, transport=httpx.MockTransport(handler)
+    ))
+    try:
+        assert main(["chat", "alpha", "--no-stream"]) == (0 if sent else 1)
+    finally:
+        get_settings.cache_clear()
+    assert seen == ([f"Bearer {secret}"] if sent else [])
+
+
+def thinking_stream():
+    return httpx.Response(200, text=(
+        event({"role": "assistant"})
+        + event({"reasoning_content": "\nweigh it"}) + event({"reasoning_content": " up"})
+        + event({"content": "\n\nanswer"}) + event(finish="stop") + "data: [DONE]\n\n"
+    ), headers={"content-type": "text/event-stream"})
+
+
+@pytest.mark.parametrize("tty,show,no_color,expected", [
+    (True, True, False, "\033[2mweigh it up\033[0m\n\nanswer\n"),
+    (True, True, True, "weigh it up\n\nanswer\n"),
+    (True, False, False, "answer\n"),
+    (False, True, False, "answer\n"),
+])
+def test_streamed_thinking_is_muted_and_never_history(monkeypatch, capsys, tty, show, no_color, expected):
+    monkeypatch.setattr("sys.stdout.isatty", lambda: tty)
+    if no_color:
+        monkeypatch.setenv("NO_COLOR", "1")
+    else:
+        monkeypatch.delenv("NO_COLOR", raising=False)
+    session = ChatSession("alpha", show_thinking=show)
+    with httpx.Client(base_url="http://gateway/", transport=httpx.MockTransport(lambda r: thinking_stream())) as client:
+        session.turn(client, "api", "q", stream=True)
+    assert capsys.readouterr().out == expected
+    assert session.messages[-1] == {"role": "assistant", "content": "answer"}
+
+
+def test_non_streamed_thinking_is_muted(monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    reply = httpx.Response(200, json={"choices": [{"message": {
+        "role": "assistant", "content": "answer", "reasoning_content": "\nhmm\n"}}]})
+    session = ChatSession("alpha")
+    with httpx.Client(base_url="http://gateway/", transport=httpx.MockTransport(lambda r: reply)) as client:
+        session.turn(client, "api", "q", stream=False)
+    assert capsys.readouterr().out == "\033[2mhmm\033[0m\n\nanswer\n"
+    assert session.messages[-1]["content"] == "answer"
+
+
+def test_think_command_toggles(capsys):
+    session = ChatSession("alpha")
+    chat_command("/think", session, None, SimpleNamespace())
+    assert session.show_thinking is False
+    assert "hidden" in capsys.readouterr().err

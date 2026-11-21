@@ -49,6 +49,7 @@ from .model_downloads import (
 from .preferences import PreferenceError, PreferenceStore
 from .profiles import RouteProfile, ProfileError, ProfileStore
 from .settings import get_settings
+from .local_token import local_token_path, remove_local_token, write_local_token
 from .throttle import LoginThrottle
 from .symlink import PairingStore, create_symlink
 
@@ -59,7 +60,11 @@ credentials = CredentialStore(
     seed_api_keys=settings.control_api_keys,
     seed_admin_token=settings.control_admin_token,
 )
-require_api_key, require_admin, require_display = build_dependencies(credentials)
+# Minted in lifespan; None until the gateway is actually serving.
+_local_token: dict[str, str | None] = {"value": None}
+require_api_key, require_admin, require_display = build_dependencies(
+    credentials, lambda: _local_token["value"]
+)
 login_throttle = LoginThrottle()
 metrics = MetricsCollector()
 model_browser = ModelBrowser()
@@ -94,7 +99,17 @@ async def lifespan(_: FastAPI):
     # The first entry in every log, and the marker a client sees alongside a
     # new epoch when the gateway has been restarted underneath it.
     events.record("gateway.started", "Gateway started")
-    yield
+    token_path = local_token_path(settings.credentials_path)
+    try:
+        _local_token["value"] = write_local_token(token_path)
+    except OSError as exc:
+        events.record("gateway.local_token_failed", f"Local CLI token not written: {exc}")
+    try:
+        yield
+    finally:
+        if _local_token["value"]:
+            remove_local_token(token_path, _local_token["value"])
+            _local_token["value"] = None
     await asyncio.gather(
         control.close(), images.close(), model_downloads.close(), ledger.close()
     )
