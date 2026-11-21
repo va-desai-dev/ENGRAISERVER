@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "runtime_id": "engrai-text",
-  "runtime_version": "0.1.0-llama-fcac190",
+  "runtime_version": "engrai-mk2",
   "kernel": {
     "name": "llama.cpp",
     "repository": "https://github.com/ggml-org/llama.cpp.git",
